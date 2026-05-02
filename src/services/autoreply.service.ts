@@ -3,8 +3,9 @@
  */
 
 import { createLogger } from '../core/logger.js'
-import { getEnabledAutoReplyRules } from '../db/index.js'
+import { getEnabledAutoReplyRules, getLatestOrderByChatId } from '../db/index.js'
 import { generateAIReply, type AIContext } from './ai.service.js'
+import { matchItemGroupForItem } from './item-group.service.js'
 import type { ChatMessage, DbAutoReplyRule, AutoReplyResult } from '../types/index.js'
 
 const logger = createLogger('Svc:AutoReply')
@@ -19,15 +20,16 @@ export async function checkAutoReply(
 ): Promise<AutoReplyResult> {
     try {
         const rules = getEnabledAutoReplyRules(accountId)
+        const itemContext = resolveItemContext(accountId, msg, context)
 
         // 分离普通规则和排除匹配规则
-        const normalRules = rules.filter(r => !r.exclude_match)
-        const excludeRules = rules.filter(r => r.exclude_match)
+        const normalRules = rules.filter(r => !r.exclude_match && matchRuleItemGroup(r, itemContext.itemGroupId))
+        const excludeRules = rules.filter(r => r.exclude_match && matchRuleItemGroup(r, itemContext.itemGroupId))
 
         // 构建 AI 上下文，包含买家信息用于工具调用
         const aiContext: AIContext = {
             userName: context?.userName || msg.senderName,
-            itemTitle: context?.itemTitle,
+            itemTitle: itemContext.itemTitle,
             accountId,
             buyerUserId: msg.senderId,
             chatId: msg.chatId
@@ -70,36 +72,32 @@ export async function checkAutoReply(
             }
         }
 
-        // 普通规则都没匹配，检查排除匹配规则
-        for (const rule of excludeRules) {
+        // 普通规则都没匹配，选择最高优先级的一条兜底规则
+        const fallbackRule = excludeRules[0]
+        if (fallbackRule) {
             try {
-                // AI 类型的排除匹配规则
-                if (rule.match_type === 'ai') {
-                    const rulePrompt = rule.reply_content || undefined
+                if (fallbackRule.match_type === 'ai') {
+                    const rulePrompt = fallbackRule.reply_content || undefined
                     const aiReply = await generateAIReply(msg.content, aiContext, rulePrompt)
                     if (aiReply) {
                         logger.info(`[${accountId}] AI 排除匹配回复: ${msg.content} -> ${aiReply}`)
                         return {
                             matched: true,
-                            ruleName: rule.name,
+                            ruleName: fallbackRule.name,
                             replyContent: aiReply,
                             isAI: true
                         }
                     }
-                    continue
-                }
-
-                // 普通排除匹配规则
-                logger.info(`[${accountId}] 排除匹配规则 "${rule.name}": ${msg.content} -> ${rule.reply_content}`)
-                return {
-                    matched: true,
-                    ruleName: rule.name,
-                    replyContent: rule.reply_content
+                } else if (fallbackRule.reply_content) {
+                    logger.info(`[${accountId}] 排除匹配规则 "${fallbackRule.name}": ${msg.content} -> ${fallbackRule.reply_content}`)
+                    return {
+                        matched: true,
+                        ruleName: fallbackRule.name,
+                        replyContent: fallbackRule.reply_content
+                    }
                 }
             } catch (error: any) {
-                logger.error(`[${accountId}] 处理排除规则 "${rule.name}" 时发生异常: ${error.message}`)
-                // 继续处理下一个规则
-                continue
+                logger.error(`[${accountId}] 处理排除规则 "${fallbackRule.name}" 时发生异常: ${error.message}`)
             }
         }
 
@@ -108,6 +106,31 @@ export async function checkAutoReply(
         logger.error(`[${accountId}] 检查自动回复时发生异常: ${error.message}`)
         return { matched: false }
     }
+}
+
+function resolveItemContext(
+    accountId: string,
+    msg: ChatMessage,
+    context?: { userName?: string; itemTitle?: string }
+): { itemId?: string; itemTitle?: string; itemGroupId: number | null } {
+    const order = msg.chatId ? getLatestOrderByChatId(accountId, msg.chatId) : null
+    const itemId = msg.itemId || order?.itemId || undefined
+    const itemTitle = context?.itemTitle || msg.itemTitle || order?.itemTitle || undefined
+    const itemGroupId = matchItemGroupForItem(accountId, itemId)
+
+    return {
+        itemId,
+        itemTitle,
+        itemGroupId
+    }
+}
+
+function matchRuleItemGroup(rule: DbAutoReplyRule, itemGroupId: number | null): boolean {
+    if (!rule.item_group_id) {
+        return true
+    }
+
+    return itemGroupId === rule.item_group_id
 }
 
 /**

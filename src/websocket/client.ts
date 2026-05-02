@@ -6,12 +6,15 @@ import { CookiesManager } from '../core/cookies.manager.js'
 import { generateDeviceId, generateMid, generateSign } from '../utils/crypto.js'
 import { nowLocalString } from '../utils/date.js'
 import { TokenManager } from './token.js'
-import { updateAccountStatus } from '../db/index.js'
+import { getOrders, getAccountStatus, updateAccountStatus } from '../db/index.js'
 import { sendMessage } from './message.sender.js'
 import { processWebSocketMessage } from './message.receiver.js'
+import { fetchAndUpdateOrderDetail } from '../services/order.service.js'
 import type { MessageCallback } from '../types/index.js'
 
 const logger = createLogger('Ws:Client')
+const SYNC_CURSOR_GRACE_MS = 2 * 60 * 1000
+const SYNC_CURSOR_MAX_LOOKBACK_MS = 24 * 60 * 60 * 1000
 
 export class GoofishClient {
     private _accountId: string
@@ -27,6 +30,8 @@ export class GoofishClient {
     private networkCheckTimer: NodeJS.Timeout | null = null
     private lastHeartbeatTime: number = 0
     private onMessage?: MessageCallback
+    private hasConnectedOnce = false
+    private recoveringOrders = false
 
     constructor(accountId: string, onMessage?: MessageCallback) {
         this._accountId = accountId
@@ -53,6 +58,10 @@ export class GoofishClient {
 
     isConnected(): boolean {
         return this.ws?.readyState === WebSocket.OPEN
+    }
+
+    isRunning(): boolean {
+        return this.running
     }
 
     getUserId(): string {
@@ -276,6 +285,10 @@ export class GoofishClient {
     }
 
     private startHeartbeat() {
+        if (this.heartbeatTimer) {
+            clearInterval(this.heartbeatTimer)
+        }
+
         this.heartbeatTimer = setInterval(() => {
             if (this.ws?.readyState === WebSocket.OPEN) {
                 const msg = { lwp: '/!', headers: { mid: generateMid() } }
@@ -283,8 +296,7 @@ export class GoofishClient {
                 this.lastHeartbeatTime = Date.now()
                 logger.debug(`[${this._accountId}] 心跳已发送`)
                 updateAccountStatus({ accountId: this._accountId, lastHeartbeat: nowLocalString() })
-            } else {
-                // 连接已关闭，尝试重连
+            } else if (this.running) {
                 logger.warn(`[${this._accountId}] 心跳发送失败，连接已关闭，尝试重连`)
                 this.tryReconnect()
             }
@@ -292,40 +304,55 @@ export class GoofishClient {
     }
 
     private startNetworkCheck() {
+        if (this.networkCheckTimer) {
+            clearInterval(this.networkCheckTimer)
+        }
+
         this.networkCheckTimer = setInterval(() => {
+            if (!this.running || !this.isConnected() || this.lastHeartbeatTime <= 0) {
+                return
+            }
+
             const now = Date.now()
-            const heartbeatTimeout = WS_CONFIG.HEARTBEAT_INTERVAL * 3 * 1000 // 3倍心跳间隔视为超时
-            
-            // 检查是否超过心跳超时时间
-            if (now - this.lastHeartbeatTime > heartbeatTimeout && this.running) {
+            const heartbeatTimeout = WS_CONFIG.HEARTBEAT_INTERVAL * 3 * 1000
+            if (now - this.lastHeartbeatTime > heartbeatTimeout) {
                 logger.warn(`[${this._accountId}] 心跳超时，可能网络已断开，尝试重连`)
                 this.tryReconnect()
             }
-        }, 30000) // 每30秒检查一次
+        }, 30000)
     }
 
     private tryReconnect() {
-        if (!this.running) return
-        
-        // 清除现有的重连定时器
-        if (this.reconnectTimer) {
-            clearTimeout(this.reconnectTimer)
-            this.reconnectTimer = null
+        if (!this.running) {
+            return
         }
-        
-        // 实现指数退避重连策略
+
+        if (this.reconnectTimer) {
+            return
+        }
+
+        if (this.connectionFailures >= WS_CONFIG.MAX_RECONNECT_ATTEMPTS) {
+            this.running = false
+            logger.error(`[${this._accountId}] 达到最大重连尝试次数，停止重连`)
+            updateAccountStatus({ accountId: this._accountId, connected: false, errorMessage: '达到最大重连尝试次数' })
+            return
+        }
+
         this.connectionFailures++
-        const maxDelay = 60000 // 最大重连延迟60秒
+        const maxDelay = 60000
         const delay = Math.min(
             WS_CONFIG.RECONNECT_DELAY * Math.pow(1.5, Math.min(this.connectionFailures - 1, 5)),
             maxDelay
         )
-        
+
         logger.info(`[${this._accountId}] ${Math.round(delay / 1000)}秒后尝试重连 (${this.connectionFailures}/${WS_CONFIG.MAX_RECONNECT_ATTEMPTS})`)
-        
+
         this.reconnectTimer = setTimeout(async () => {
-            if (!this.running) return
-            
+            this.reconnectTimer = null
+            if (!this.running) {
+                return
+            }
+
             try {
                 logger.info(`[${this._accountId}] 开始重连...`)
                 this.cleanup()
@@ -333,22 +360,14 @@ export class GoofishClient {
                 if (success) {
                     logger.info(`[${this._accountId}] 重连成功`)
                     this.connectionFailures = 0
-                } else {
-                    logger.error(`[${this._accountId}] 重连失败`)
-                    // 如果未达到最大重连次数，继续尝试
-                    if (this.connectionFailures < WS_CONFIG.MAX_RECONNECT_ATTEMPTS) {
-                        this.tryReconnect()
-                    } else {
-                        logger.error(`[${this._accountId}] 达到最大重连尝试次数，停止重连`)
-                        updateAccountStatus({ accountId: this._accountId, errorMessage: '达到最大重连尝试次数' })
-                    }
+                    return
                 }
+
+                logger.error(`[${this._accountId}] 重连失败`)
+                this.tryReconnect()
             } catch (e) {
                 logger.error(`[${this._accountId}] 重连异常: ${e}`)
-                // 如果未达到最大重连次数，继续尝试
-                if (this.connectionFailures < WS_CONFIG.MAX_RECONNECT_ATTEMPTS) {
-                    this.tryReconnect()
-                }
+                this.tryReconnect()
             }
         }, delay)
     }
@@ -360,16 +379,33 @@ export class GoofishClient {
                 const token = await this.tokenManager.refresh()
                 if (token) {
                     logger.info(`[${this._accountId}] Token刷新成功`)
-                    updateAccountStatus({ accountId: this._accountId, lastTokenRefresh: nowLocalString() })
+                    updateAccountStatus({ accountId: this._accountId, lastTokenRefresh: nowLocalString(), errorMessage: '' })
                 } else {
-                    logger.warn(`[${this._accountId}] Token刷新失败`)
+                    const errorMessage = this.tokenManager.getLastError() || 'Token刷新失败'
+                    logger.warn(`[${this._accountId}] Token刷新失败: ${errorMessage}`)
+                    updateAccountStatus({ accountId: this._accountId, connected: false, errorMessage })
                 }
             }
         }, WS_CONFIG.TOKEN_REFRESH_INTERVAL * 1000)
         logger.info(`[${this._accountId}] Token刷新定时器已启动，间隔: ${WS_CONFIG.TOKEN_REFRESH_INTERVAL}秒`)
     }
 
-    private async initConnection() {
+    private getSyncAckTimestampMs(isReconnect: boolean): number {
+        const now = Date.now()
+        const lastSyncTimestamp = getAccountStatus(this._accountId)?.lastSyncTimestamp
+
+        if (!lastSyncTimestamp || !Number.isFinite(lastSyncTimestamp) || lastSyncTimestamp <= 0) {
+            return now
+        }
+
+        const baseTimestamp = isReconnect
+            ? Math.max(0, lastSyncTimestamp - SYNC_CURSOR_GRACE_MS)
+            : lastSyncTimestamp
+
+        return Math.max(baseTimestamp, now - SYNC_CURSOR_MAX_LOOKBACK_MS)
+    }
+
+    private async initConnection(isReconnect: boolean) {
         if (!this.ws) return
 
         let token = this.tokenManager.getToken()
@@ -377,8 +413,10 @@ export class GoofishClient {
             logger.info(`[${this._accountId}] 首次连接，正在获取Token...`)
             token = await this.tokenManager.refresh()
             if (!token) {
-                logger.error(`[${this._accountId}] 获取Token失败，无法完成注册`)
-                return
+                const errorMessage = this.tokenManager.getLastError() || '获取Token失败，无法完成注册'
+                logger.error(`[${this._accountId}] ${errorMessage}`)
+                updateAccountStatus({ accountId: this._accountId, connected: false, errorMessage })
+                throw new Error(errorMessage)
             }
         }
 
@@ -398,17 +436,18 @@ export class GoofishClient {
 
         await new Promise(r => setTimeout(r, 1000))
 
-        const currentTime = Date.now()
+        const syncTimestamp = this.getSyncAckTimestampMs(isReconnect)
         const syncMsg = {
             lwp: '/r/SyncStatus/ackDiff',
             headers: { mid: generateMid() },
             body: [{
                 pipeline: 'sync', tooLong2Tag: 'PNM,1', channel: 'sync',
-                topic: 'sync', highPts: 0, pts: currentTime * 1000, seq: 0, timestamp: currentTime
+                topic: 'sync', highPts: 0, pts: syncTimestamp * 1000, seq: 0, timestamp: syncTimestamp
             }]
         }
         this.ws.send(JSON.stringify(syncMsg))
-        logger.info(`[${this._accountId}] 连接注册完成`)
+        updateAccountStatus({ accountId: this._accountId, lastSyncTimestamp: syncTimestamp })
+        logger.info(`[${this._accountId}] 连接注册完成，同步起点: ${new Date(syncTimestamp).toLocaleString('zh-CN', { hour12: false })}${isReconnect ? '（重连补偿）' : ''}`)
     }
 
     private sendAck(headers: any) {
@@ -420,43 +459,104 @@ export class GoofishClient {
         this.ws.send(JSON.stringify(ack))
     }
 
+    private getRecentOrderStart(days: number): string {
+        const date = new Date()
+        date.setDate(date.getDate() - days)
+        const year = date.getFullYear()
+        const month = String(date.getMonth() + 1).padStart(2, '0')
+        const day = String(date.getDate()).padStart(2, '0')
+        const hours = String(date.getHours()).padStart(2, '0')
+        const minutes = String(date.getMinutes()).padStart(2, '0')
+        const seconds = String(date.getSeconds()).padStart(2, '0')
+        return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`
+    }
+
+    private async recoverRecentOrdersAfterReconnect() {
+        if (this.recoveringOrders) {
+            return
+        }
+
+        this.recoveringOrders = true
+
+        try {
+            const recentOrders = getOrders({
+                accountId: this._accountId,
+                orderTimeStart: this.getRecentOrderStart(1),
+                limit: 200,
+                offset: 0
+            })
+
+            if (recentOrders.length === 0) {
+                logger.info(`[${this._accountId}] 重连后最近1天无本地订单，跳过补单`)
+                return
+            }
+
+            let refreshed = 0
+            for (const order of recentOrders) {
+                const detail = await fetchAndUpdateOrderDetail(this, order.orderId)
+                if (detail) {
+                    refreshed++
+                }
+                await new Promise(resolve => setTimeout(resolve, 100))
+            }
+
+            logger.info(`[${this._accountId}] 重连后订单回补完成：${refreshed}/${recentOrders.length}，已允许状态变化补触发自动发货`)
+        } catch (e) {
+            logger.error(`[${this._accountId}] 重连后订单回补失败: ${e}`)
+        } finally {
+            this.recoveringOrders = false
+        }
+    }
+
     async connect(): Promise<boolean> {
         return new Promise((resolve) => {
+            let settled = false
+            let connectionEstablished = false
+
+            const finish = (result: boolean) => {
+                if (settled) {
+                    return
+                }
+                settled = true
+                resolve(result)
+            }
+
             try {
                 logger.info(`[${this._accountId}] 正在连接 WebSocket...`)
                 this.ws = new WebSocket(WS_CONFIG.URL, { headers: WS_HEADERS })
 
-                // 设置连接超时
                 const connectionTimeout = setTimeout(() => {
                     logger.error(`[${this._accountId}] 连接超时`)
                     this.cleanup()
-                    if (this.ws) {
-                        this.ws.close()
-                        this.ws = null
-                    }
                     updateAccountStatus({ accountId: this._accountId, connected: false, errorMessage: '连接超时' })
-                    resolve(false)
-                }, 30000) // 30秒超时
+                    finish(false)
+                }, 30000)
 
                 this.ws.on('open', async () => {
                     clearTimeout(connectionTimeout)
+                    connectionEstablished = true
+                    const hadSyncCursor = Boolean(getAccountStatus(this._accountId)?.lastSyncTimestamp)
+                    const isReconnect = this.hasConnectedOnce || hadSyncCursor
+                    this.hasConnectedOnce = true
+                    this.lastHeartbeatTime = Date.now()
                     logger.info(`[${this._accountId}] WebSocket 连接已建立`)
                     this.connectionFailures = 0
                     updateAccountStatus({ accountId: this._accountId, connected: true, errorMessage: '' })
 
                     try {
-                        await this.initConnection()
+                        await this.initConnection(isReconnect)
                         this.startHeartbeat()
                         this.startTokenRefresh()
-                        resolve(true)
+                        this.startNetworkCheck()
+                        if (isReconnect) {
+                            void this.recoverRecentOrdersAfterReconnect()
+                        }
+                        finish(true)
                     } catch (e) {
                         logger.error(`[${this._accountId}] 初始化连接失败: ${e}`)
                         this.cleanup()
-                        if (this.ws) {
-                            this.ws.close()
-                            this.ws = null
-                        }
-                        resolve(false)
+                        updateAccountStatus({ accountId: this._accountId, connected: false, errorMessage: String(e) })
+                        finish(false)
                     }
                 })
 
@@ -481,61 +581,58 @@ export class GoofishClient {
 
                 this.ws.on('close', (code, reason) => {
                     clearTimeout(connectionTimeout)
-                    logger.warn(`[${this._accountId}] WebSocket 连接关闭: ${code} - ${reason}`)
-                    this.cleanup()
+                    const reasonText = typeof reason === 'string' ? reason : reason?.toString() || ''
+                    logger.warn(`[${this._accountId}] WebSocket 连接关闭: ${code} - ${reasonText}`)
+                    this.cleanup(false)
+                    this.lastHeartbeatTime = 0
                     updateAccountStatus({ accountId: this._accountId, connected: false })
 
-                    if (this.running && this.connectionFailures < WS_CONFIG.MAX_RECONNECT_ATTEMPTS) {
-                        this.connectionFailures++
-                        // 实现指数退避策略
-                        const delay = WS_CONFIG.RECONNECT_DELAY * Math.pow(1.5, Math.min(this.connectionFailures - 1, 5))
-                        logger.info(`[${this._accountId}] ${Math.round(delay / 1000)}秒后尝试重连 (${this.connectionFailures}/${WS_CONFIG.MAX_RECONNECT_ATTEMPTS})`)
-                        setTimeout(() => this.connect(), delay)
-                    } else if (this.running) {
-                        logger.error(`[${this._accountId}] 达到最大重连尝试次数，停止重连`)
-                        updateAccountStatus({ accountId: this._accountId, errorMessage: '达到最大重连尝试次数' })
+                    if (!connectionEstablished) {
+                        finish(false)
+                        return
+                    }
+
+                    if (this.running) {
+                        this.tryReconnect()
                     }
                 })
 
                 this.ws.on('error', (err) => {
                     clearTimeout(connectionTimeout)
                     logger.error(`[${this._accountId}] WebSocket 错误: ${err.message}`)
-                    this.cleanup()
                     updateAccountStatus({ accountId: this._accountId, connected: false, errorMessage: err.message })
-                    resolve(false)
+                    if (!connectionEstablished) {
+                        this.cleanup()
+                        finish(false)
+                    }
                 })
             } catch (e) {
                 logger.error(`[${this._accountId}] 连接失败: ${e}`)
                 this.cleanup()
                 updateAccountStatus({ accountId: this._accountId, connected: false, errorMessage: String(e) })
-                resolve(false)
+                finish(false)
             }
         })
     }
 
-    private cleanup() {
-        // 清理心跳定时器
+    private cleanup(closeSocket = true) {
         if (this.heartbeatTimer) {
             clearInterval(this.heartbeatTimer)
             this.heartbeatTimer = null
         }
-        // 清理token刷新定时器
         if (this.tokenRefreshTimer) {
             clearInterval(this.tokenRefreshTimer)
             this.tokenRefreshTimer = null
         }
-        // 清理网络检查定时器
         if (this.networkCheckTimer) {
             clearInterval(this.networkCheckTimer)
             this.networkCheckTimer = null
         }
-        // 清理重连定时器
         if (this.reconnectTimer) {
             clearTimeout(this.reconnectTimer)
             this.reconnectTimer = null
         }
-        // 确保WebSocket连接被关闭
-        if (this.ws) {
+        if (closeSocket && this.ws) {
             try {
                 this.ws.close()
             } catch (e) {
@@ -543,28 +640,29 @@ export class GoofishClient {
             } finally {
                 this.ws = null
             }
+        } else if (!closeSocket) {
+            this.ws = null
         }
     }
 
     disconnect() {
         this.running = false
+        this.connectionFailures = 0
+        this.lastHeartbeatTime = 0
         this.cleanup()
-        if (this.ws) {
-            this.ws.close()
-            this.ws = null
-        }
         updateAccountStatus({ accountId: this._accountId, connected: false })
         logger.info(`[${this._accountId}] 客户端已断开连接`)
     }
 
     async run() {
         this.running = true
-        this.startNetworkCheck()
         const connected = await this.connect()
         if (!connected) {
-            logger.error(`[${this._accountId}] 启动失败`)
             this.running = false
+            logger.error(`[${this._accountId}] 初次连接失败，未加入运行队列`)
+            return false
         }
-        return connected
+
+        return true
     }
 }

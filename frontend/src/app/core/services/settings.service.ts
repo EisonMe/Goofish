@@ -24,7 +24,11 @@ export class SettingsService {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(settings)
         });
-        return res.json();
+        const data = await res.json().catch(() => ({ success: false, error: '保存 AI 设置失败' }));
+        if (!res.ok || data.success === false) {
+            throw new Error(data.error || '保存 AI 设置失败');
+        }
+        return data;
     }
 
     async testAIConnection(): Promise<{ success: boolean; error?: string }> {

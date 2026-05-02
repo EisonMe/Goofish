@@ -5,13 +5,14 @@
 import OpenAI from 'openai'
 
 import { createLogger } from '../core/logger.js'
-import { getAISettings } from '../db/index.js'
+import { getAISettings, DEFAULT_AI_MODEL } from '../db/index.js'
 import { AI_TOOLS, queryBuyerOrders, getChatHistory, type OrderQueryContext } from '../ai-tools/index.js'
 
 const logger = createLogger('Svc:AI')
 
 let openaiClient: OpenAI | null = null
 let lastSettings: string = ''
+const DEFAULT_SYSTEM_PROMPT = '你是一个闲鱼卖家的智能客服助手，请用简洁友好的语气回复买家的消息。'
 
 // 获取或创建 OpenAI 客户端
 function getClient(): OpenAI | null {
@@ -42,6 +43,74 @@ export interface AIContext {
     accountId?: string
     buyerUserId?: string
     chatId?: string
+}
+
+function extractMessageText(message: { content?: unknown } | undefined): string | null {
+    if (!message) return null
+
+    const { content } = message
+
+    if (typeof content === 'string') {
+        const text = content.trim()
+        return text || null
+    }
+
+    if (Array.isArray(content)) {
+        const text = content
+            .map(part => {
+                if (typeof part === 'string') return part
+                if (part && typeof part === 'object' && 'type' in part && part.type === 'text' && 'text' in part) {
+                    return String(part.text || '')
+                }
+                return ''
+            })
+            .join('')
+            .trim()
+
+        return text || null
+    }
+
+    return null
+}
+
+function buildEmptyResponseError(model: string): string {
+    if (model.startsWith('gpt-5')) {
+        return `当前模型 ${model} 在该上游返回空文本内容（接口已返回 200，但 content 为 null），不是请求头问题。建议改用 ${DEFAULT_AI_MODEL}。`
+    }
+
+    return `当前模型 ${model} 未返回有效文本内容`
+}
+
+function normalizePrompt(prompt?: string | null): string {
+    return String(prompt || '').trim()
+}
+
+function buildSystemMessages(
+    globalPromptRaw?: string | null,
+    rulePromptRaw?: string | null,
+    enableTools = false
+): OpenAI.ChatCompletionMessageParam[] {
+    const globalPrompt = normalizePrompt(globalPromptRaw) || DEFAULT_SYSTEM_PROMPT
+    const rulePrompt = normalizePrompt(rulePromptRaw)
+    const messages: OpenAI.ChatCompletionMessageParam[] = [
+        { role: 'system', content: globalPrompt }
+    ]
+
+    if (enableTools) {
+        messages.push({
+            role: 'system',
+            content: '你可以使用 query_buyer_orders 工具查询当前买家在本店的订单信息。买家问订单时先查工具再回复，严禁编造订单、金额、数量或发货状态。'
+        })
+    }
+
+    if (rulePrompt && rulePrompt !== globalPrompt) {
+        messages.push({
+            role: 'system',
+            content: `以下是当前规则的附加要求，只能补充，不能覆盖全局提示词；如与全局提示词冲突，一律以全局提示词为准：\n${rulePrompt}`
+        })
+    }
+
+    return messages
 }
 
 /**
@@ -87,20 +156,15 @@ export async function generateAIReply(
     }
 
     const settings = getAISettings()
+    const model = settings.model || DEFAULT_AI_MODEL
 
     try {
-        // 优先使用规则级别的提示词，否则使用全局提示词
-        let systemPrompt = rulePrompt || settings.systemPrompt ||
-            '你是一个闲鱼卖家的智能客服助手，请用简洁友好的语气回复买家的消息。'
-
-        // 如果启用了工具，添加工具使用说明
-        if (context?.accountId && context?.buyerUserId) {
-            systemPrompt += '\n\n你可以使用 query_buyer_orders 工具查询当前买家在本店的订单信息。当买家询问订单相关问题时，请先调用此工具获取订单数据再回复。'
-        }
-
-        const messages: OpenAI.ChatCompletionMessageParam[] = [
-            { role: 'system', content: systemPrompt }
-        ]
+        const enableTools = !!(context?.accountId && context?.buyerUserId)
+        const messages: OpenAI.ChatCompletionMessageParam[] = buildSystemMessages(
+            settings.systemPrompt,
+            rulePrompt,
+            enableTools
+        )
 
         // 添加上下文信息
         if (context?.userName || context?.itemTitle) {
@@ -124,13 +188,10 @@ export async function generateAIReply(
         // 添加当前用户消息
         messages.push({ role: 'user', content: userMessage })
 
-        // 判断是否启用工具（需要有买家信息）
-        const enableTools = !!(context?.accountId && context?.buyerUserId)
-
         logger.info(`AI 调用: enableTools=${enableTools}, model=${settings.model}`)
 
         const requestParams: OpenAI.ChatCompletionCreateParams = {
-            model: settings.model || 'gpt-3.5-turbo',
+            model,
             messages,
             max_tokens: 500,
             temperature: 0.7
@@ -172,27 +233,31 @@ export async function generateAIReply(
 
             // 再次调用获取最终回复
             const finalResponse = await client.chat.completions.create({
-                model: settings.model || 'gpt-3.5-turbo',
+                model,
                 messages,
                 max_tokens: 500,
-                temperature: 0.7
+                temperature: 0.7,
+                ...(enableTools ? { tools: AI_TOOLS, tool_choice: 'none' as const } : {})
             })
 
-            const reply = finalResponse.choices[0]?.message?.content?.trim()
+            const reply = extractMessageText(finalResponse.choices[0]?.message)
             if (reply) {
                 logger.info(`AI 回复生成成功(含工具): ${userMessage.slice(0, 30)}... -> ${reply.slice(0, 30)}...`)
                 return reply
             }
+
+            logger.warn(`AI 工具调用后返回空内容: model=${model}, finish_reason=${finalResponse.choices[0]?.finish_reason}, completion_tokens=${finalResponse.usage?.completion_tokens ?? 0}`)
         }
 
         // 直接回复
-        const reply = choice?.message?.content?.trim()
+        const reply = extractMessageText(choice?.message)
 
         if (reply) {
             logger.info(`AI 回复生成成功: ${userMessage.slice(0, 30)}... -> ${reply.slice(0, 30)}...`)
             return reply
         }
 
+        logger.warn(`AI 返回空内容: model=${model}, finish_reason=${choice?.finish_reason}, completion_tokens=${response.usage?.completion_tokens ?? 0}`)
         return null
     } catch (e) {
         logger.error(`AI 回复生成失败: ${e}`)
@@ -210,18 +275,21 @@ export async function testAIConnection(): Promise<{ success: boolean; error?: st
     }
 
     const settings = getAISettings()
+    const model = settings.model || DEFAULT_AI_MODEL
 
     try {
         const response = await client.chat.completions.create({
-            model: settings.model || 'gpt-3.5-turbo',
+            model,
             messages: [{ role: 'user', content: '你好' }],
             max_tokens: 10
         })
 
-        if (response.choices[0]?.message?.content) {
+        if (extractMessageText(response.choices[0]?.message)) {
             return { success: true }
         }
-        return { success: false, error: '未收到有效响应' }
+
+        logger.warn(`AI 测试返回空内容: model=${model}, finish_reason=${response.choices[0]?.finish_reason}, completion_tokens=${response.usage?.completion_tokens ?? 0}`)
+        return { success: false, error: buildEmptyResponseError(model) }
     } catch (e: any) {
         return { success: false, error: e.message || '连接失败' }
     }

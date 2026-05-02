@@ -2,10 +2,40 @@ import { createLogger } from '../core/logger.js'
 import { decryptSyncData, extractChatMessage, isOrderStatusMessage } from './message.parser.js'
 import { checkAutoReply, handleUserReply } from '../services/index.js'
 import { addRawMessage } from '../api/routes/dev-messages.route.js'
+import { updateAccountStatus } from '../db/index.js'
 import type { ChatMessage, MessageCallback } from '../types/index.js'
 import type { GoofishClient } from './client.js'
 
 const logger = createLogger('Ws:Receiver')
+const RECENT_MESSAGE_DEDUPE_TTL_MS = 10 * 60 * 1000
+const recentMessageKeys = new Map<string, number>()
+
+function buildRecentMessageKey(accountId: string, msg: ChatMessage): string {
+    if (msg.msgId) {
+        return `${accountId}:msg:${msg.msgId}`
+    }
+
+    return `${accountId}:fallback:${msg.chatId}:${msg.senderId}:${msg.timestamp || msg.msgTime}:${msg.content}`
+}
+
+function isDuplicateRecentMessage(accountId: string, msg: ChatMessage): boolean {
+    const now = Date.now()
+
+    for (const [key, expiresAt] of recentMessageKeys.entries()) {
+        if (expiresAt <= now) {
+            recentMessageKeys.delete(key)
+        }
+    }
+
+    const key = buildRecentMessageKey(accountId, msg)
+    const expiresAt = recentMessageKeys.get(key)
+    if (expiresAt && expiresAt > now) {
+        return true
+    }
+
+    recentMessageKeys.set(key, now + RECENT_MESSAGE_DEDUPE_TTL_MS)
+    return false
+}
 
 export interface MessageReceiverContext {
     accountId: string
@@ -40,6 +70,7 @@ export async function handleSyncMessage(msgData: any, ctx: MessageReceiverContex
     }
 
     const messages: ChatMessage[] = []
+    let maxTimestamp = 0
 
     for (const item of dataList) {
         const data = typeof item === 'object' ? (item.data || item) : item
@@ -62,6 +93,15 @@ export async function handleSyncMessage(msgData: any, ctx: MessageReceiverContex
             continue
         }
 
+        if (typeof chatMsg.timestamp === 'number' && chatMsg.timestamp > maxTimestamp) {
+            maxTimestamp = chatMsg.timestamp
+        }
+
+        if (isDuplicateRecentMessage(accountId, chatMsg)) {
+            logger.debug(`[${accountId}] 跳过短时间内重复消息: ${chatMsg.msgId || chatMsg.content}`)
+            continue
+        }
+
         logger.info(`[${accountId}] [${chatMsg.msgTime}] 收到消息 - 发送者: ${chatMsg.senderName}, chatId: ${chatMsg.chatId}, 内容: ${chatMsg.content}${chatMsg.orderId ? `, 订单ID: ${chatMsg.orderId}` : ''}`)
         messages.push(chatMsg)
 
@@ -70,8 +110,9 @@ export async function handleSyncMessage(msgData: any, ctx: MessageReceiverContex
             logger.debug(`[${accountId}] 订单状态消息，跳过自动回复检查`)
         } else {
             // 先检查是否有等待中的工作流程需要继续执行
+            let workflowHandled = false
             if (ctx.client && chatMsg.chatId) {
-                const workflowHandled = await handleUserReply(
+                workflowHandled = await handleUserReply(
                     accountId,
                     chatMsg.chatId,
                     chatMsg.senderId,
@@ -83,16 +124,22 @@ export async function handleSyncMessage(msgData: any, ctx: MessageReceiverContex
                 }
             }
 
-            // 检查自动回复规则
-            const autoReplyResult = await checkAutoReply(accountId, chatMsg)
-            if (autoReplyResult.matched && autoReplyResult.replyContent && chatMsg.chatId && onAutoReply) {
-                await onAutoReply(chatMsg.chatId, chatMsg.senderId, autoReplyResult.replyContent)
+            // 仅当工作流未处理时，才检查自动回复规则
+            if (!workflowHandled) {
+                const autoReplyResult = await checkAutoReply(accountId, chatMsg)
+                if (autoReplyResult.matched && autoReplyResult.replyContent && chatMsg.chatId && onAutoReply) {
+                    await onAutoReply(chatMsg.chatId, chatMsg.senderId, autoReplyResult.replyContent)
+                }
             }
         }
 
         if (onMessage) {
             await onMessage(accountId, chatMsg)
         }
+    }
+
+    if (maxTimestamp > 0) {
+        updateAccountStatus({ accountId, lastSyncTimestamp: maxTimestamp })
     }
 
     return messages
@@ -139,7 +186,7 @@ export async function processWebSocketMessage(
             logger.debug(`[${accountId}] 收到推送消息`)
             addRawMessage(accountId, msgData)
             sendAck(msgData.headers)
-            if (msgData?.body?.syncPushPackage?.data?.length > 0 || msgData?.body) {
+            if (msgData?.body?.syncPushPackage?.data?.length > 0 || Array.isArray(msgData?.body?.data) || Array.isArray(msgData?.body)) {
                 await handleSyncMessage(msgData, ctx)
             }
             return

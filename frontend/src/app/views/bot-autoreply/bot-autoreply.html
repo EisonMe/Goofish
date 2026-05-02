@@ -33,6 +33,26 @@
                             </select>
                         </div>
 
+                        @if (formData().matchType === 'ai') {
+                        <div class="form-control">
+                            <label class="label py-1">
+                                <span class="label-text">商品分组</span>
+                            </label>
+                            <select class="select select-bordered select-sm w-full"
+                                [ngModel]="formData().itemGroupId"
+                                (ngModelChange)="updateFormField('itemGroupId', $event === '' ? null : +$event)"
+                                name="itemGroupId">
+                                <option [ngValue]="null">全部商品</option>
+                                @for (group of itemGroups(); track group.id) {
+                                <option [ngValue]="group.id">{{ group.name }}</option>
+                                }
+                            </select>
+                            <label class="label py-1">
+                                <span class="label-text-alt text-base-content/50">可为不同商品分组配置不同 AI 提示词；留空表示适用于全部商品</span>
+                            </label>
+                        </div>
+                        }
+
                         <div class="form-control">
                             <label class="label cursor-pointer justify-start gap-2 py-1">
                                 <input type="checkbox" class="toggle toggle-sm toggle-primary"
@@ -84,7 +104,7 @@
                                 name="replyContent"></textarea>
                             @if (formData().matchType === 'ai') {
                             <label class="label py-1">
-                                <span class="label-text-alt text-info">留空保存时将自动填入全局提示词</span>
+                                <span class="label-text-alt text-info">留空时运行回复会回退到全局提示词</span>
                             </label>
                             @if (globalPrompt()) {
                             <div class="bg-base-200 rounded-lg p-2 mt-1">
@@ -188,6 +208,7 @@
                                     <th>状态</th>
                                     <th>名称</th>
                                     <th>匹配方式</th>
+                                    <th>商品分组</th>
                                     <th>匹配内容</th>
                                     <th>回复内容</th>
                                     <th>优先级</th>
@@ -205,6 +226,9 @@
                                     <td>
                                         <span class="badge badge-ghost badge-sm">{{ getMatchTypeName(rule.matchType)
                                             }}</span>
+                                    </td>
+                                    <td class="max-w-32 truncate" [title]="getRuleScopeText(rule)">
+                                        {{ getRuleScopeText(rule) }}
                                     </td>
                                     <td class="max-w-32 truncate" [title]="rule.matchPattern">
                                         @if (rule.excludeMatch) {
@@ -261,6 +285,10 @@
                                         } @else {
                                         <span class="truncate">{{ rule.matchPattern || '(所有消息)' }}</span>
                                         }
+                                    </div>
+                                    <div class="flex gap-2">
+                                        <span class="text-base-content/50 shrink-0">分组:</span>
+                                        <span class="truncate">{{ getRuleScopeText(rule) }}</span>
                                     </div>
                                     <div class="flex gap-2">
                                         <span class="text-base-content/50 shrink-0">

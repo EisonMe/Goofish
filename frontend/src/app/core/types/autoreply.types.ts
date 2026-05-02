@@ -13,6 +13,8 @@ export interface AutoReplyRule {
     matchPattern: string;
     replyContent: string;
     accountId: string | null;
+    itemGroupId: number | null;
+    itemGroupName?: string | null;
     excludeMatch: boolean;
     createdAt: string;
     updatedAt: string;

@@ -13,7 +13,8 @@ import type { Workflow } from '../../core/types';
 import { NODE_TYPES, NodeConfigData, MindMapNode } from './node-configs';
 import { WorkflowListComponent, NodeConfigPanelComponent } from './components';
 import {
-    definitionToMindMap, mindMapToDefinition, getDefaultWorkflowTemplate
+    definitionToMindMap, mindMapToDefinition, getDefaultWorkflowTemplate,
+    findBranchOverflowNode, MAX_BRANCH_OUTPUTS
 } from './workflow-converter';
 
 @Component({
@@ -38,6 +39,7 @@ export class BotWorkflowComponent implements OnInit, AfterViewInit, OnDestroy {
     readonly nodeTypes = NODE_TYPES;
 
     private mindMap: any = null;
+    private mindMapInitTimer: ReturnType<typeof setTimeout> | null = null;
 
     workflows = signal<Workflow[]>([]);
     loading = signal(false);
@@ -76,6 +78,7 @@ export class BotWorkflowComponent implements OnInit, AfterViewInit, OnDestroy {
     ngAfterViewInit() { }
 
     ngOnDestroy() {
+        this.clearMindMapInitTimer();
         this.destroyMindMap();
     }
 
@@ -100,7 +103,7 @@ export class BotWorkflowComponent implements OnInit, AfterViewInit, OnDestroy {
             mindMapData: getDefaultWorkflowTemplate()
         });
         this.selectedNode.set(null);
-        setTimeout(() => this.initMindMap(), 100);
+        this.scheduleMindMapInit();
     }
 
     editWorkflow(workflow: Workflow) {
@@ -111,13 +114,31 @@ export class BotWorkflowComponent implements OnInit, AfterViewInit, OnDestroy {
             isDefault: workflow.isDefault,
             mindMapData: definitionToMindMap(workflow.definition)
         });
-        setTimeout(() => this.initMindMap(), 100);
+        this.selectedNode.set(null);
+        this.scheduleMindMapInit();
     }
 
     cancelEdit() {
+        this.clearMindMapInitTimer();
         this.destroyMindMap();
         this.editingWorkflow.set(null);
         this.selectedNode.set(null);
+    }
+
+    private clearMindMapInitTimer() {
+        if (this.mindMapInitTimer) {
+            clearTimeout(this.mindMapInitTimer);
+            this.mindMapInitTimer = null;
+        }
+    }
+
+    private scheduleMindMapInit() {
+        this.destroyMindMap();
+        this.clearMindMapInitTimer();
+        this.mindMapInitTimer = setTimeout(() => {
+            this.mindMapInitTimer = null;
+            void this.initMindMap();
+        }, 50);
     }
 
     updateFormField(field: string, value: any) {
@@ -156,7 +177,10 @@ export class BotWorkflowComponent implements OnInit, AfterViewInit, OnDestroy {
                 delayMaxMs: config.delayMaxMs,
                 delayUnit: config.delayUnit,
                 expression: config.expression,
-                keywords: config.keywords.split(',').filter(Boolean),
+                keywords: config.keywords
+                    .split(',')
+                    .map(keyword => keyword.trim())
+                    .filter(Boolean),
                 matchMode: config.matchMode,
                 promptMessage: config.promptMessage,
                 message: config.message
@@ -165,9 +189,53 @@ export class BotWorkflowComponent implements OnInit, AfterViewInit, OnDestroy {
         this.mindMap.render();
     }
 
-    // 思维导图操作
+
+    private findMindMapNodeByUid(
+        node: MindMapNode | null,
+        uid: string,
+        parent: MindMapNode | null = null
+    ): { node: MindMapNode; parent: MindMapNode | null } | null {
+        if (!node) return null;
+        if (node.data.uid === uid) {
+            return { node, parent };
+        }
+
+        for (const child of node.children || []) {
+            const found = this.findMindMapNodeByUid(child, uid, node);
+            if (found) {
+                return found;
+            }
+        }
+
+        return null;
+    }
+
+    private isBranchingNodeType(type: string | undefined): boolean {
+        return type === 'condition' || type === 'autoreply';
+    }
+
+    private async ensureBranchCapacity(parentUid: string | undefined) {
+        if (!parentUid) return true;
+
+        const target = this.findMindMapNodeByUid(this.workflowForm().mindMapData, parentUid);
+        if (!target) return true;
+
+        const childCount = target.node.children?.length ?? 0;
+        if (this.isBranchingNodeType(target.node.data.nodeType) && childCount >= MAX_BRANCH_OUTPUTS) {
+            await this.dialog.alert(
+                '提示',
+                `节点“${target.node.data.text || '未命名节点'}”最多只支持 ${MAX_BRANCH_OUTPUTS} 个分支，请先删除多余分支后再继续。`
+            );
+            return false;
+        }
+
+        return true;
+    }
+
     async initMindMap() {
         if (!this.mindMapContainer?.nativeElement) return;
+
+        this.destroyMindMap();
 
         const MindMap = (await import('simple-mind-map')).default;
         // @ts-ignore
@@ -250,11 +318,18 @@ export class BotWorkflowComponent implements OnInit, AfterViewInit, OnDestroy {
         });
     }
 
-    addNode(type: string) {
-        if (!this.mindMap || !this.selectedNode()) {
-            this.dialog.alert('提示', '请先选择一个节点');
+    async addNode(type: string) {
+        const node = this.selectedNode();
+        if (!this.mindMap || !node) {
+            await this.dialog.alert('提示', '请先选择一个节点');
             return;
         }
+
+        const selectedUid = node.getData?.().uid as string | undefined;
+        if (!await this.ensureBranchCapacity(selectedUid)) {
+            return;
+        }
+
         const typeConfig = NODE_TYPES[type as keyof typeof NODE_TYPES];
         if (!typeConfig) return;
         this.mindMap.execCommand('INSERT_CHILD_NODE', false, [], {
@@ -268,16 +343,25 @@ export class BotWorkflowComponent implements OnInit, AfterViewInit, OnDestroy {
         });
     }
 
-    addSiblingNode(type: string) {
+    async addSiblingNode(type: string) {
         const node = this.selectedNode();
         if (!this.mindMap || !node) {
-            this.dialog.alert('提示', '请先选择一个节点');
+            await this.dialog.alert('提示', '请先选择一个节点');
             return;
         }
         if (node.isRoot) {
-            this.dialog.alert('提示', '根节点不能添加兄弟节点');
+            await this.dialog.alert('提示', '根节点不能添加兄弟节点');
             return;
         }
+
+        const selectedUid = node.getData?.().uid as string | undefined;
+        const selectedEntry = selectedUid
+            ? this.findMindMapNodeByUid(this.workflowForm().mindMapData, selectedUid)
+            : null;
+        if (!await this.ensureBranchCapacity(selectedEntry?.parent?.data.uid)) {
+            return;
+        }
+
         const typeConfig = NODE_TYPES[type as keyof typeof NODE_TYPES];
         if (!typeConfig) return;
         this.mindMap.execCommand('INSERT_NODE', false, [], {
@@ -291,11 +375,18 @@ export class BotWorkflowComponent implements OnInit, AfterViewInit, OnDestroy {
         });
     }
 
-    addConditionBranch() {
-        if (!this.mindMap || !this.selectedNode()) {
-            this.dialog.alert('提示', '请先选择一个节点');
+    async addConditionBranch() {
+        const node = this.selectedNode();
+        if (!this.mindMap || !node) {
+            await this.dialog.alert('提示', '请先选择一个节点');
             return;
         }
+
+        const selectedUid = node.getData?.().uid as string | undefined;
+        if (!await this.ensureBranchCapacity(selectedUid)) {
+            return;
+        }
+
         const ts = Date.now();
         this.mindMap.execCommand('INSERT_CHILD_NODE', false, [], {
             text: '条件判断',
@@ -310,24 +401,38 @@ export class BotWorkflowComponent implements OnInit, AfterViewInit, OnDestroy {
         setTimeout(() => {
             const condNode = this.mindMap.renderer.findNodeByUid(`condition_${ts}`);
             if (!condNode) return;
+
             this.mindMap.execCommand('CLEAR_ACTIVE_NODE');
             condNode.active();
 
             setTimeout(() => {
                 this.mindMap.execCommand('INSERT_CHILD_NODE', false, [], {
-                    text: 'IF: 条件成立', uid: `if_${ts}`, nodeType: 'condition',
-                    fillColor: '#22c55e', borderColor: '#22c55e', fontColor: '#ffffff',
+                    text: 'IF: 条件成立',
+                    uid: `if_${ts}`,
+                    nodeType: 'condition',
+                    edgeFromOutput: 'output_1',
+                    fillColor: '#22c55e',
+                    borderColor: '#22c55e',
+                    fontColor: '#ffffff',
                     config: { branch: 'if' }
                 });
+
                 setTimeout(() => {
                     const ifNode = this.mindMap.renderer.findNodeByUid(`if_${ts}`);
                     if (!ifNode) return;
+
                     this.mindMap.execCommand('CLEAR_ACTIVE_NODE');
                     ifNode.active();
+
                     setTimeout(() => {
                         this.mindMap.execCommand('INSERT_NODE', false, [], {
-                            text: 'ELSE: 条件不成立', uid: `else_${ts}`, nodeType: 'condition',
-                            fillColor: '#ef4444', borderColor: '#ef4444', fontColor: '#ffffff',
+                            text: 'ELSE: 条件不成立',
+                            uid: `else_${ts}`,
+                            nodeType: 'condition',
+                            edgeFromOutput: 'output_2',
+                            fillColor: '#ef4444',
+                            borderColor: '#ef4444',
+                            fontColor: '#ffffff',
                             config: { branch: 'else' }
                         });
                     }, 50);
@@ -401,8 +506,7 @@ export class BotWorkflowComponent implements OnInit, AfterViewInit, OnDestroy {
 
             // 如果已经在编辑模式，重新初始化思维导图
             if (this.editingWorkflow()) {
-                this.destroyMindMap();
-                setTimeout(() => this.initMindMap(), 100);
+                this.scheduleMindMapInit();
             }
 
             await this.dialog.alert('成功', '工作流导入成功');
@@ -437,6 +541,15 @@ export class BotWorkflowComponent implements OnInit, AfterViewInit, OnDestroy {
             return;
         }
 
+        const branchOverflow = findBranchOverflowNode(form.mindMapData);
+        if (branchOverflow) {
+            await this.dialog.alert(
+                '提示',
+                `节点“${branchOverflow.nodeName}”当前有 ${branchOverflow.childCount} 个分支，最多只支持 ${MAX_BRANCH_OUTPUTS} 个，请先删除多余分支再保存。`
+            );
+            return;
+        }
+
         this.saving.set(true);
         try {
             const definition = mindMapToDefinition(form.mindMapData);
@@ -461,7 +574,7 @@ export class BotWorkflowComponent implements OnInit, AfterViewInit, OnDestroy {
             this.cancelEdit();
         } catch (e) {
             console.error('保存流程失败', e);
-            await this.dialog.alert('错误', '保存流程失败');
+            await this.dialog.alert('错误', e instanceof Error ? e.message : '保存流程失败');
         } finally {
             this.saving.set(false);
         }

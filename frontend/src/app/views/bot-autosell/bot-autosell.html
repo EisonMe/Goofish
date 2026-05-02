@@ -41,7 +41,11 @@
                             </label>
                             @if (selectedGoods(); as goods) {
                             <div class="flex items-center gap-2 p-2 bg-base-200 rounded-lg">
+                                @if (goods.picUrl) {
                                 <img [src]="goods.picUrl" class="w-10 h-10 rounded object-cover" />
+                                } @else {
+                                <div class="w-10 h-10 rounded bg-base-300 flex items-center justify-center text-base-content/40 text-xs">无图</div>
+                                }
                                 <div class="flex-1 min-w-0">
                                     <div class="text-sm font-medium truncate">{{ goods.title }}</div>
                                     <div class="text-xs text-base-content/50">¥{{ goods.price }}</div>
@@ -67,7 +71,11 @@
                                     @for (goods of filteredGoods(); track goods.id) {
                                     <div class="flex items-center gap-2 p-2 hover:bg-base-200 cursor-pointer"
                                         (mousedown)="selectGoods(goods)">
+                                        @if (goods.picUrl) {
                                         <img [src]="goods.picUrl" class="w-8 h-8 rounded object-cover" />
+                                        } @else {
+                                        <div class="w-8 h-8 rounded bg-base-300 flex items-center justify-center text-base-content/40 text-[10px]">无图</div>
+                                        }
                                         <div class="flex-1 min-w-0">
                                             <div class="text-sm truncate">{{ goods.title }}</div>
                                             <div class="text-xs text-base-content/50">
@@ -89,6 +97,42 @@
                                 }
                             </div>
                             }
+                        </div>
+
+                        <div class="space-y-3 p-3 bg-base-200 rounded-lg">
+                            <div class="text-sm font-medium">金额匹配（可选）</div>
+                            <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+                                <div class="form-control">
+                                    <label class="label py-1">
+                                        <span class="label-text">精确金额</span>
+                                    </label>
+                                    <input type="text" class="input input-bordered input-sm w-full"
+                                        [ngModel]="formData().matchPrice"
+                                        (ngModelChange)="updateField('matchPrice', $event)" name="matchPrice"
+                                        placeholder="例如：19.99" />
+                                </div>
+                                <div class="form-control">
+                                    <label class="label py-1">
+                                        <span class="label-text">最低金额</span>
+                                    </label>
+                                    <input type="text" class="input input-bordered input-sm w-full"
+                                        [ngModel]="formData().priceMin"
+                                        (ngModelChange)="updateField('priceMin', $event)" name="priceMin"
+                                        placeholder="例如：10" />
+                                </div>
+                                <div class="form-control">
+                                    <label class="label py-1">
+                                        <span class="label-text">最高金额</span>
+                                    </label>
+                                    <input type="text" class="input input-bordered input-sm w-full"
+                                        [ngModel]="formData().priceMax"
+                                        (ngModelChange)="updateField('priceMax', $event)" name="priceMax"
+                                        placeholder="例如：20" />
+                                </div>
+                            </div>
+                            <div class="text-xs text-base-content/60">
+                                留空 = 不按金额筛选；填“精确金额”时优先生效；只填最低/最高金额可做区间匹配。
+                            </div>
                         </div>
 
                         <div class="form-control">
@@ -148,33 +192,67 @@
 
                         <!-- 库存配置 -->
                         @if (formData().deliveryType === 'stock') {
-                        <div class="form-control">
-                            <label class="label py-1">
-                                <span class="label-text">库存内容（每行一条）</span>
-                                <span class="label-text-alt">
-                                    <label class="btn btn-xs btn-ghost gap-1 cursor-pointer">
-                                        <lucide-angular [img]="icons.Upload" class="w-3 h-3" />
-                                        导入文件
-                                        <input type="file" class="hidden" accept=".txt,.csv"
-                                            (change)="onStockFileSelect($event)" />
-                                    </label>
-                                </span>
-                            </label>
-                            <textarea class="textarea textarea-bordered textarea-sm w-full font-mono" rows="6"
-                                [ngModel]="stockContent()" (ngModelChange)="stockContent.set($event)"
-                                placeholder="卡密1&#10;卡密2&#10;卡密3&#10;..."></textarea>
-                            <label class="label py-1">
-                                <span class="label-text-alt text-base-content/50">
-                                    @if (editingRule()) {
-                                    当前库存: {{ editingRuleStock().available }}/{{ editingRuleStock().total }}，新增内容将追加到现有库存
-                                    } @else {
-                                    支持 txt/csv 文件导入，每行一条
+                        <div class="space-y-3 p-3 bg-base-200 rounded-lg">
+                            <div class="form-control">
+                                <label class="label py-1">
+                                    <span class="label-text">库存模式</span>
+                                </label>
+                                <select class="select select-bordered select-sm w-full"
+                                    [ngModel]="formData().sharedStockRuleId"
+                                    (ngModelChange)="updateField('sharedStockRuleId', $event)" name="sharedStockRuleId">
+                                    <option [ngValue]="null">独立库存</option>
+                                    @for (sourceRule of sharedStockSourceOptions(); track sourceRule.id) {
+                                    <option [ngValue]="sourceRule.id">
+                                        共享「{{ sourceRule.name }}」 · {{ getPriceMatchLabel(sourceRule) }}
+                                    </option>
                                     }
-                                </span>
-                                @if (stockContent()) {
-                                <span class="label-text-alt text-info">待添加: {{ stockContentCount() }} 条</span>
-                                }
-                            </label>
+                                </select>
+                                <label class="label py-1">
+                                    <span class="label-text-alt text-base-content/60">
+                                        @if (sharedStockSourceOptions().length === 0) {
+                                        当前没有可共享的库存规则，先保存一条库存规则后就能给其他商品或价格档位复用。
+                                        } @else {
+                                        不同商品、不同价格档位都可共享同一批卡密，避免重复导入库存。
+                                        }
+                                    </span>
+                                </label>
+                            </div>
+
+                            @if (selectedSharedStockSource(); as sourceRule) {
+                            <div class="rounded-lg border border-info/30 bg-info/10 p-3 text-sm">
+                                当前规则会与「{{ sourceRule.name }}」共用同一库存池。
+                                查看库存、补库存、清空库存都会作用到这批共享卡密。
+                            </div>
+                            } @else {
+                            <div class="form-control">
+                                <label class="label py-1">
+                                    <span class="label-text">库存内容（每行一条）</span>
+                                    <span class="label-text-alt">
+                                        <label class="btn btn-xs btn-ghost gap-1 cursor-pointer">
+                                            <lucide-angular [img]="icons.Upload" class="w-3 h-3" />
+                                            导入文件
+                                            <input type="file" class="hidden" accept=".txt,.csv"
+                                                (change)="onStockFileSelect($event)" />
+                                        </label>
+                                    </span>
+                                </label>
+                                <textarea class="textarea textarea-bordered textarea-sm w-full font-mono" rows="6"
+                                    [ngModel]="stockContent()" (ngModelChange)="stockContent.set($event)"
+                                    placeholder="卡密1&#10;卡密2&#10;卡密3&#10;..."></textarea>
+                                <label class="label py-1">
+                                    <span class="label-text-alt text-base-content/50">
+                                        @if (editingRule()) {
+                                        当前库存: {{ editingRuleStock().available }}/{{ editingRuleStock().total }}，新增内容将追加到现有库存
+                                        } @else {
+                                        支持 txt/csv 文件导入，每行一条
+                                        }
+                                    </span>
+                                    @if (stockContent()) {
+                                    <span class="label-text-alt text-info">待添加: {{ stockContentCount() }} 条</span>
+                                    }
+                                </label>
+                            </div>
+                            }
                         </div>
                         }
 
@@ -278,6 +356,8 @@
                         <li><span class="font-medium">固定文本：</span>直接发送预设内容（卡密、链接等）</li>
                         <li><span class="font-medium text-secondary">库存发货：</span>从库存列表中取货，一次性消耗</li>
                         <li><span class="font-medium text-accent">API取货：</span>通过外部API获取发货内容</li>
+                        <li><span class="font-medium">同商品多档位：</span>每条规则都要填金额或区间，否则会落到第一条可用规则。</li>
+                        <li><span class="font-medium">共享库存：</span>适合跨商品或多价格档位复用同一批卡密。</li>
                     </ul>
                 </div>
             </div>
@@ -325,7 +405,10 @@
                                         <input type="checkbox" class="toggle toggle-sm toggle-success"
                                             [checked]="rule.enabled" (change)="toggleRule(rule)" />
                                     </td>
-                                    <td class="font-medium">{{ rule.name }}</td>
+                                    <td>
+                                        <div class="font-medium">{{ rule.name }}</div>
+                                        <div class="text-xs text-base-content/50">{{ getPriceMatchLabel(rule) }}</div>
+                                    </td>
                                     <td class="max-w-40">
                                         <span class="text-sm truncate block" [title]="getGoodsTitle(rule.itemId || '')">
                                             {{ getGoodsTitle(rule.itemId || '') }}
@@ -341,10 +424,17 @@
                                     </td>
                                     <td>
                                         @if (rule.deliveryType === 'stock') {
-                                        <span class="text-sm font-mono">
-                                            {{ (rule.stockCount || 0) - (rule.usedCount || 0) }}/{{ rule.stockCount || 0
-                                            }}
-                                        </span>
+                                        <div class="space-y-0.5">
+                                            <div class="text-sm font-mono">
+                                                {{ (rule.stockCount || 0) - (rule.usedCount || 0) }}/{{ rule.stockCount || 0
+                                                }}
+                                            </div>
+                                            @if (rule.sharedStockRuleId) {
+                                            <div class="text-xs text-base-content/50">
+                                                共享自：{{ getRuleName(rule.sharedStockRuleId) }}
+                                            </div>
+                                            }
+                                        </div>
                                         } @else {
                                         <span class="text-base-content/30">-</span>
                                         }
@@ -382,7 +472,10 @@
                                     <div class="flex items-center gap-2">
                                         <input type="checkbox" class="toggle toggle-sm toggle-success"
                                             [checked]="rule.enabled" (change)="toggleRule(rule)" />
-                                        <span class="font-medium">{{ rule.name }}</span>
+                                        <div>
+                                            <div class="font-medium">{{ rule.name }}</div>
+                                            <div class="text-xs text-base-content/50">{{ getPriceMatchLabel(rule) }}</div>
+                                        </div>
                                     </div>
                                     <span class="badge badge-sm" [class.badge-primary]="rule.deliveryType === 'fixed'"
                                         [class.badge-secondary]="rule.deliveryType === 'stock'"
@@ -398,8 +491,15 @@
                                     @if (rule.deliveryType === 'stock') {
                                     <div class="flex gap-2">
                                         <span class="text-base-content/50 shrink-0">库存:</span>
-                                        <span class="font-mono">{{ (rule.stockCount || 0) - (rule.usedCount || 0) }}/{{
-                                            rule.stockCount || 0 }}</span>
+                                        <div class="min-w-0">
+                                            <div class="font-mono">{{ (rule.stockCount || 0) - (rule.usedCount || 0) }}/{{
+                                                rule.stockCount || 0 }}</div>
+                                            @if (rule.sharedStockRuleId) {
+                                            <div class="text-xs text-base-content/50 truncate">
+                                                共享自：{{ getRuleName(rule.sharedStockRuleId) }}
+                                            </div>
+                                            }
+                                        </div>
                                     </div>
                                     }
                                 </div>
@@ -444,6 +544,13 @@
                     <span class="text-base-content/50">已用:</span>
                     <span class="font-mono">{{ stats.used }}</span>
                 </div>
+            </div>
+            }
+
+            @if (stockModalSharedSource(); as sourceRule) {
+            <div class="mt-3 rounded-lg border border-info/30 bg-info/10 p-3 text-sm">
+                当前查看的是共享库存，来源规则：{{ sourceRule.name }}。
+                清空库存会同时影响所有共享这批库存的规则。
             </div>
             }
 

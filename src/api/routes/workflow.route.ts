@@ -11,6 +11,7 @@ import {
     updateWorkflow,
     deleteWorkflow
 } from '../../db/index.js'
+import { validateWorkflowDefinition } from '../../utils/workflow-validation.js'
 
 export function createWorkflowRoutes() {
     const app = new Hono()
@@ -25,7 +26,7 @@ export function createWorkflowRoutes() {
     app.get('/:id', (c) => {
         const id = parseInt(c.req.param('id'))
         if (isNaN(id)) {
-            return c.json({ error: '无效的流程ID' }, 400)
+            return c.json({ error: '无效的流程 ID' }, 400)
         }
         const workflow = getWorkflowById(id)
         if (!workflow) {
@@ -43,6 +44,11 @@ export function createWorkflowRoutes() {
             return c.json({ error: '缺少必要参数' }, 400)
         }
 
+        const validation = validateWorkflowDefinition(definition)
+        if (!validation.valid) {
+            return c.json({ error: validation.errors[0] || '流程配置无效' }, 400)
+        }
+
         const id = createWorkflow({ name, description, definition, isDefault })
         return c.json({ success: true, id })
     })
@@ -51,9 +57,16 @@ export function createWorkflowRoutes() {
     app.put('/:id', async (c) => {
         const id = parseInt(c.req.param('id'))
         if (isNaN(id)) {
-            return c.json({ error: '无效的流程ID' }, 400)
+            return c.json({ error: '无效的流程 ID' }, 400)
         }
         const body = await c.req.json()
+
+        if (body.definition) {
+            const validation = validateWorkflowDefinition(body.definition)
+            if (!validation.valid) {
+                return c.json({ error: validation.errors[0] || '流程配置无效' }, 400)
+            }
+        }
 
         const success = updateWorkflow(id, body)
         if (!success) {
@@ -66,7 +79,7 @@ export function createWorkflowRoutes() {
     app.delete('/:id', (c) => {
         const id = parseInt(c.req.param('id'))
         if (isNaN(id)) {
-            return c.json({ error: '无效的流程ID' }, 400)
+            return c.json({ error: '无效的流程 ID' }, 400)
         }
         const success = deleteWorkflow(id)
         if (!success) {
@@ -79,7 +92,7 @@ export function createWorkflowRoutes() {
     app.post('/:id/default', (c) => {
         const id = parseInt(c.req.param('id'))
         if (isNaN(id)) {
-            return c.json({ error: '无效的流程ID' }, 400)
+            return c.json({ error: '无效的流程 ID' }, 400)
         }
         const success = updateWorkflow(id, { isDefault: true })
         if (!success) {

@@ -18,6 +18,7 @@ export class SystemSettingComponent implements OnInit {
     readonly settingsService = inject(SettingsService);
     readonly dialog = inject(DialogService);
     readonly icons = ICONS;
+    readonly recommendedStableModel = 'deepseek-v3.1-terminus';
 
     get currentTheme() {
         return this.themeService.themeMode();
@@ -27,7 +28,7 @@ export class SystemSettingComponent implements OnInit {
         baseUrl: '',
         apiKey: '',
         hasApiKey: false,
-        model: 'gpt-3.5-turbo',
+        model: this.recommendedStableModel,
         systemPrompt: ''
     });
     savingAI = signal(false);
@@ -40,7 +41,10 @@ export class SystemSettingComponent implements OnInit {
     async loadAISettings() {
         try {
             const settings = await this.settingsService.getAISettings();
-            this.aiSettings.set(settings);
+            this.aiSettings.set({
+                ...settings,
+                model: settings.model || this.recommendedStableModel
+            });
         } catch (e) {
             console.error('加载 AI 设置失败', e);
         }

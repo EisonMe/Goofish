@@ -11,7 +11,14 @@ import type {
 
 // 获取所有规则
 export function getAutoReplyRules(): DbAutoReplyRule[] {
-    const stmt = db.prepare('SELECT * FROM autoreply_rules ORDER BY priority DESC, id ASC')
+    const stmt = db.prepare(`
+        SELECT r.*, g.name AS item_group_name
+        FROM autoreply_rules r
+        LEFT JOIN item_groups g ON g.id = r.item_group_id
+        ORDER BY r.priority DESC,
+                 CASE WHEN r.item_group_id IS NULL THEN 1 ELSE 0 END ASC,
+                 r.id ASC
+    `)
     return stmt.all() as DbAutoReplyRule[]
 }
 
@@ -19,31 +26,47 @@ export function getAutoReplyRules(): DbAutoReplyRule[] {
 export function getEnabledAutoReplyRules(accountId?: string): DbAutoReplyRule[] {
     if (accountId) {
         const stmt = db.prepare(`
-            SELECT * FROM autoreply_rules 
-            WHERE enabled = 1 AND (account_id IS NULL OR account_id = ?)
-            ORDER BY priority DESC, id ASC
+            SELECT r.*, g.name AS item_group_name
+            FROM autoreply_rules r
+            LEFT JOIN item_groups g ON g.id = r.item_group_id
+            WHERE r.enabled = 1 AND (r.account_id IS NULL OR r.account_id = ?)
+            ORDER BY r.priority DESC,
+                     CASE WHEN r.item_group_id IS NULL THEN 1 ELSE 0 END ASC,
+                     r.id ASC
         `)
         return stmt.all(accountId) as DbAutoReplyRule[]
     }
     const stmt = db.prepare(`
-        SELECT * FROM autoreply_rules 
-        WHERE enabled = 1
-        ORDER BY priority DESC, id ASC
+        SELECT r.*, g.name AS item_group_name
+        FROM autoreply_rules r
+        LEFT JOIN item_groups g ON g.id = r.item_group_id
+        WHERE r.enabled = 1
+        ORDER BY r.priority DESC,
+                 CASE WHEN r.item_group_id IS NULL THEN 1 ELSE 0 END ASC,
+                 r.id ASC
     `)
     return stmt.all() as DbAutoReplyRule[]
 }
 
 // 获取单个规则
 export function getAutoReplyRule(id: number): DbAutoReplyRule | undefined {
-    const stmt = db.prepare('SELECT * FROM autoreply_rules WHERE id = ?')
+    const stmt = db.prepare(`
+        SELECT r.*, g.name AS item_group_name
+        FROM autoreply_rules r
+        LEFT JOIN item_groups g ON g.id = r.item_group_id
+        WHERE r.id = ?
+    `)
     return stmt.get(id) as DbAutoReplyRule | undefined
 }
 
 // 创建规则
 export function createAutoReplyRule(rule: CreateAutoReplyRuleParams): number {
     const stmt = db.prepare(`
-        INSERT INTO autoreply_rules (name, enabled, priority, match_type, match_pattern, reply_content, account_id, exclude_match)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO autoreply_rules (
+            name, enabled, priority, match_type, match_pattern,
+            reply_content, account_id, item_group_id, exclude_match
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     `)
     const result = stmt.run(
         rule.name,
@@ -53,6 +76,7 @@ export function createAutoReplyRule(rule: CreateAutoReplyRuleParams): number {
         rule.matchPattern,
         rule.replyContent,
         rule.accountId || null,
+        rule.itemGroupId ?? null,
         rule.excludeMatch ? 1 : 0
     )
     return result.lastInsertRowid as number
@@ -66,7 +90,7 @@ export function updateAutoReplyRule(id: number, rule: UpdateAutoReplyRuleParams)
     const stmt = db.prepare(`
         UPDATE autoreply_rules SET
             name = ?, enabled = ?, priority = ?, match_type = ?,
-            match_pattern = ?, reply_content = ?, account_id = ?, exclude_match = ?,
+            match_pattern = ?, reply_content = ?, account_id = ?, item_group_id = ?, exclude_match = ?,
             updated_at = CURRENT_TIMESTAMP
         WHERE id = ?
     `)
@@ -78,6 +102,7 @@ export function updateAutoReplyRule(id: number, rule: UpdateAutoReplyRuleParams)
         rule.matchPattern ?? existing.match_pattern,
         rule.replyContent ?? existing.reply_content,
         rule.accountId !== undefined ? rule.accountId : existing.account_id,
+        rule.itemGroupId !== undefined ? rule.itemGroupId : existing.item_group_id,
         rule.excludeMatch !== undefined ? (rule.excludeMatch ? 1 : 0) : (existing.exclude_match || 0),
         id
     )

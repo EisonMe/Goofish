@@ -8,6 +8,18 @@ export interface OrdersUpdate {
     total: number;
 }
 
+export interface OrderSubscriptionParams {
+    accountId?: string;
+    groupId?: number;
+    status?: number;
+    keyword?: string;
+    hasRefund?: boolean;
+    pendingRedelivery?: boolean;
+    orderTimeStart?: string;
+    limit?: number;
+    offset?: number;
+}
+
 export interface AccountsUpdate {
     accounts: Account[];
     clients: Array<{ accountId: string; connected: boolean; userId: string }>;
@@ -114,10 +126,25 @@ export class WSPushService {
         }
     }
 
+    private setParam(key: string, value: string | number | undefined): void {
+        if (value === undefined || value === null || value === '') {
+            delete this.params[key];
+            return;
+        }
+        this.params[key] = value;
+    }
+
     // 订阅订单更新
-    subscribeOrders(accountId?: string, status?: number): void {
-        this.params['accountId'] = accountId;
-        this.params['status'] = status;
+    subscribeOrders(params: OrderSubscriptionParams = {}): void {
+        this.setParam('accountId', params.accountId);
+        this.setParam('groupId', params.groupId);
+        this.setParam('status', params.status);
+        this.setParam('keyword', params.keyword?.trim());
+        this.setParam('hasRefund', params.hasRefund === undefined ? undefined : (params.hasRefund ? '1' : '0'));
+        this.setParam('pendingRedelivery', params.pendingRedelivery ? '1' : undefined);
+        this.setParam('orderTimeStart', params.orderTimeStart);
+        this.setParam('ordersLimit', params.limit);
+        this.setParam('ordersOffset', params.offset);
 
         if (!this.subscriptions.has('orders')) {
             this.subscriptions.add('orders');

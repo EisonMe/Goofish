@@ -9,10 +9,12 @@ export type ViewType =
     | 'accounts'
     | 'goods'
     | 'orders'
+    | 'reports'
+    | 'item-groups'
+    | 'conversations'
     | 'autoreply'
     | 'autosell'
     | 'workflow'
-    | 'conversations'
     | 'logs'
     | 'setting'
     | 'time-setting';

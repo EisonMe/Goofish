@@ -8,3 +8,6 @@ export { createAutoReplyRoutes } from './autoreply.js'
 export { createOrderRoutes } from './order.route.js'
 export { createAutoSellRoutes } from './autosell.js'
 export { createWorkflowRoutes } from './workflow.route.js'
+export { createReportRoutes } from './report.route.js'
+
+export { createItemGroupRoutes } from './item-group.route.js'

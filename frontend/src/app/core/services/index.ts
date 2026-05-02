@@ -7,6 +7,7 @@ export { GoodsService } from './goods.service';
 export { ConversationService } from './conversation.service';
 export { LogService } from './log.service';
 export { AutoReplyService } from './autoreply.service';
+export { ItemGroupService } from './item-group.service';
 export { ThemeService, type ThemeMode } from './theme.service';
 export { OrderService } from './order.service';
 export { WSPushService, type OrdersUpdate, type AccountsUpdate } from './ws-push.service';

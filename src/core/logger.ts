@@ -10,52 +10,48 @@ const levelPriority: Record<LogLevel, number> = {
 }
 
 let currentLevel: LogLevel = 'INFO'
+let currentDate: string = ''
 let currentLogFile: string = ''
 
 export function setLogLevel(level: LogLevel) {
     currentLevel = level
 }
 
-function formatTime(): string {
-    // 使用上海时区
+const shanghaiFormatter = new Intl.DateTimeFormat('zh-CN', {
+    timeZone: 'Asia/Shanghai',
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit',
+    hour12: false
+})
+
+function getShanghaiParts() {
     const now = new Date()
     const offset = 8 * 60 // 中国时区偏移（GMT+8）
     const localTime = new Date(now.getTime() + now.getTimezoneOffset() * 60000 + offset * 60000)
-    
-    const y = localTime.getFullYear()
-    const m = String(localTime.getMonth() + 1).padStart(2, '0')
-    const d = String(localTime.getDate()).padStart(2, '0')
-    const h = String(localTime.getHours()).padStart(2, '0')
-    const min = String(localTime.getMinutes()).padStart(2, '0')
-    const s = String(localTime.getSeconds()).padStart(2, '0')
-    return `${y}-${m}-${d} ${h}:${min}:${s}`
+
+    return {
+        y: localTime.getFullYear(),
+        m: String(localTime.getMonth() + 1).padStart(2, '0'),
+        d: String(localTime.getDate()).padStart(2, '0'),
+        h: String(localTime.getHours()).padStart(2, '0'),
+        min: String(localTime.getMinutes()).padStart(2, '0'),
+        s: String(localTime.getSeconds()).padStart(2, '0')
+    }
+}
+
+function formatTime(): string {
+    const p = getShanghaiParts()
+    return `${p.y}-${p.m}-${p.d} ${p.h}:${p.min}:${p.s}`
 }
 
 function getDateStr(): string {
-    // 使用上海时区
-    const now = new Date()
-    const offset = 8 * 60 // 中国时区偏移（GMT+8）
-    const localTime = new Date(now.getTime() + now.getTimezoneOffset() * 60000 + offset * 60000)
-    
-    const y = localTime.getFullYear()
-    const m = String(localTime.getMonth() + 1).padStart(2, '0')
-    const d = String(localTime.getDate()).padStart(2, '0')
-    return `${y}-${m}-${d}`
+    const p = getShanghaiParts()
+    return `${p.y}-${p.m}-${p.d}`
 }
 
 function getTimestampStr(): string {
-    // 使用上海时区
-    const now = new Date()
-    const offset = 8 * 60 // 中国时区偏移（GMT+8）
-    const localTime = new Date(now.getTime() + now.getTimezoneOffset() * 60000 + offset * 60000)
-    
-    const y = localTime.getFullYear()
-    const m = String(localTime.getMonth() + 1).padStart(2, '0')
-    const d = String(localTime.getDate()).padStart(2, '0')
-    const h = String(localTime.getHours()).padStart(2, '0')
-    const min = String(localTime.getMinutes()).padStart(2, '0')
-    const s = String(localTime.getSeconds()).padStart(2, '0')
-    return `${y}${m}${d}_${h}${min}${s}`
+    const p = getShanghaiParts()
+    return `${p.y}${p.m}${p.d}_${p.h}${p.min}${p.s}`
 }
 
 // 初始化日志文件（每次启动创建新文件）
@@ -78,6 +74,12 @@ const logQueue: string[] = []
 let isWriting = false
 
 function flushLogs() {
+    // 检查日期是否变化，如果是则重新打开日志文件
+    const today = getDateStr()
+    if (today !== currentDate) {
+        currentDate = today
+        currentLogFile = initLogFile()
+    }
     if (isWriting || logQueue.length === 0) return
     isWriting = true
 
@@ -151,4 +153,5 @@ export function createLogger(module: string): Logger {
 }
 
 // 初始化
+currentDate = getDateStr()
 currentLogFile = initLogFile()

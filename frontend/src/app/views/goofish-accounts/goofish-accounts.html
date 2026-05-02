@@ -147,6 +147,13 @@
                                         <span class="w-1.5 h-1.5 bg-success-content rounded-full animate-pulse"></span>
                                         在线
                                     </span>
+                                    } @else if (getAccountError(account)) {
+                                    <div class="space-y-1">
+                                        <span class="badge badge-error badge-sm">{{ getAccountStatusLabel(account) }}</span>
+                                        <div class="max-w-56 truncate text-xs text-error" [title]="getAccountError(account)">
+                                            {{ getAccountError(account) }}
+                                        </div>
+                                    </div>
                                     } @else {
                                     <span class="badge badge-ghost badge-sm">离线</span>
                                     }
@@ -214,6 +221,8 @@
                                                 class="w-1.5 h-1.5 bg-success-content rounded-full animate-pulse"></span>
                                             在线
                                         </span>
+                                        } @else if (getAccountError(account)) {
+                                        <span class="badge badge-error badge-sm">{{ getAccountStatusLabel(account) }}</span>
                                         } @else {
                                         <span class="badge badge-ghost badge-sm">离线</span>
                                         }
@@ -224,6 +233,9 @@
                             <div class="text-xs text-base-content/60 mt-2">
                                 <div>备注: {{ account.remark || '-' }}</div>
                                 <div>更新: {{ formatTime(account.updatedAt) }}</div>
+                                @if (getAccountError(account)) {
+                                <div class="text-error">异常: {{ getAccountError(account) }}</div>
+                                }
                             </div>
                             <div class="card-actions justify-end mt-2">
                                 <button (click)="onRefreshInfo(account.id)" [disabled]="refreshingId() === account.id"

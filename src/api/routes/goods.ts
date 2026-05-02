@@ -1,7 +1,7 @@
 import { Hono } from 'hono'
 
 import { getAllAccounts, getAccount } from '../../db/index.js'
-import { fetchGoodsList } from '../../services/index.js'
+import { fetchAllGoodsForAccount, fetchGoodsList } from '../../services/index.js'
 import type { ClientManager } from '../../websocket/client.manager.js'
 
 export function createGoodsRoutes(getClientManager: () => ClientManager | null) {
@@ -26,20 +26,30 @@ export function createGoodsRoutes(getClientManager: () => ClientManager | null) 
             })
         }
 
-        // 获取所有账号，但只处理在线的
+        // 获取所有有 cookies 的账号商品，避免在线状态影响商品全集
         const accounts = getAllAccounts()
-        const clientManager = getClientManager()
         const allItems: any[] = []
         let totalCount = 0
 
         for (const account of accounts) {
-            // 检查账号是否在线
-            const client = clientManager?.getClient(account.id)
-            if (!client || !client.isConnected()) {
-                continue // 跳过离线账号
+            if (!account.cookies) {
+                continue
             }
 
-            const result = await fetchGoodsList(account.id, account.id, page)
+            if (page > 1) {
+                const result = await fetchGoodsList(account.id, account.id, page)
+
+                const itemsWithAccount = result.items.map(item => ({
+                    ...item,
+                    accountId: account.id,
+                    accountNickname: account.nickname
+                }))
+                allItems.push(...itemsWithAccount)
+                totalCount += result.totalCount
+                continue
+            }
+
+            const result = await fetchAllGoodsForAccount(account.id, account.id)
 
             const itemsWithAccount = result.items.map(item => ({
                 ...item,

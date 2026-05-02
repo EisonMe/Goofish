@@ -96,6 +96,20 @@ export const routes: Routes = [
                     )
             },
             {
+                path: 'reports',
+                loadComponent: () =>
+                    import('./views/system-reports/system-reports.component').then(
+                        (m) => m.SystemReportsComponent
+                    )
+            },
+            {
+                path: 'item-groups',
+                loadComponent: () =>
+                    import('./views/item-groups/item-groups.component').then(
+                        (m) => m.ItemGroupsComponent
+                    )
+            },
+            {
                 path: 'time-setting',
                 loadComponent: () =>
                     import('./views/system-time-setting/system-time-setting.component').then(

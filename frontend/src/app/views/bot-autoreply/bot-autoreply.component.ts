@@ -4,8 +4,14 @@ import { LucideAngularModule } from 'lucide-angular';
 
 import { ICONS } from '../../shared/icons';
 import { DialogService } from '../../shared/dialog';
-import { AutoReplyService, SettingsService } from '../../core/services';
+import { AutoReplyService, ItemGroupService, SettingsService } from '../../core/services';
 import type { AutoReplyRule, MatchType } from '../../core/types';
+
+interface ItemGroupOption {
+    id: number;
+    name: string;
+    description?: string | null;
+}
 
 @Component({
     selector: 'app-bot-autoreply',
@@ -16,6 +22,7 @@ import type { AutoReplyRule, MatchType } from '../../core/types';
 })
 export class BotAutoreplyComponent implements OnInit {
     private readonly autoReplyService = inject(AutoReplyService);
+    private readonly itemGroupService = inject(ItemGroupService);
     private readonly settingsService = inject(SettingsService);
     private readonly dialog = inject(DialogService);
     readonly icons = ICONS;
@@ -25,6 +32,7 @@ export class BotAutoreplyComponent implements OnInit {
     saving = signal(false);
     editingRule = signal<AutoReplyRule | null>(null);
     globalPrompt = signal('');
+    itemGroups = signal<ItemGroupOption[]>([]);
 
     formData = signal({
         name: '',
@@ -34,6 +42,7 @@ export class BotAutoreplyComponent implements OnInit {
         matchPattern: '',
         replyContent: '',
         accountId: null as string | null,
+        itemGroupId: null as number | null,
         excludeMatch: false
     });
 
@@ -45,8 +54,18 @@ export class BotAutoreplyComponent implements OnInit {
     ];
 
     ngOnInit() {
+        this.loadItemGroups();
         this.loadRules();
         this.loadGlobalPrompt();
+    }
+
+    async loadItemGroups() {
+        try {
+            const groups = await this.itemGroupService.getGroups();
+            this.itemGroups.set(Array.isArray(groups) ? groups : []);
+        } catch (e) {
+            console.error('加载商品分组失败', e);
+        }
     }
 
     async loadGlobalPrompt() {
@@ -80,6 +99,7 @@ export class BotAutoreplyComponent implements OnInit {
             matchPattern: rule.matchPattern,
             replyContent: rule.replyContent,
             accountId: rule.accountId,
+            itemGroupId: rule.itemGroupId,
             excludeMatch: rule.excludeMatch
         });
     }
@@ -98,6 +118,7 @@ export class BotAutoreplyComponent implements OnInit {
             matchPattern: '',
             replyContent: '',
             accountId: null,
+            itemGroupId: null,
             excludeMatch: false
         });
     }
@@ -154,5 +175,9 @@ export class BotAutoreplyComponent implements OnInit {
 
     updateFormField(field: string, value: any) {
         this.formData.update(f => ({ ...f, [field]: value }));
+    }
+
+    getRuleScopeText(rule: AutoReplyRule): string {
+        return rule.itemGroupName || '全部商品';
     }
 }

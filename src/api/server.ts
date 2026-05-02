@@ -19,7 +19,9 @@ import {
     createAutoReplyRoutes,
     createOrderRoutes,
     createAutoSellRoutes,
-    createWorkflowRoutes
+    createWorkflowRoutes,
+    createReportRoutes,
+    createItemGroupRoutes
 } from './routes/index.js'
 import { createDevMessageRoutes } from './routes/dev-messages.route.js'
 import { createWSPushHandler } from './routes/ws-push.route.js'
@@ -70,6 +72,7 @@ export function createApp() {
     const statusRoutes = createStatusRoutes(getClientManager)
     app.route('/', statusRoutes)
     app.route('/api', statusRoutes)
+    app.route('/api/status', statusRoutes)
 
     app.route('/api/accounts', createAccountRoutes(getClientManager))
     app.route('/api/goods', createGoodsRoutes(getClientManager))
@@ -80,6 +83,8 @@ export function createApp() {
     app.route('/api/orders', createOrderRoutes(getClientManager))
     app.route('/api/autosell', createAutoSellRoutes())
     app.route('/api/workflows', createWorkflowRoutes())
+    app.route('/api/reports', createReportRoutes())
+    app.route('/api/item-groups', createItemGroupRoutes())
 
     // 开发环境才注册调试路由
     if (ENV.IS_DEV) {
@@ -141,17 +146,31 @@ function setupStaticFiles(app: Hono) {
     }
 }
 
-export function startServer(port = SERVER_CONFIG.PORT) {
+export function startServer(port = SERVER_CONFIG.PORT): Promise<void> {
     const app = createApp()
 
-    const server = serve({ fetch: app.fetch, port, hostname: SERVER_CONFIG.HOST }, () => {
-        logger.info(`服务器启动在端口 ${port}`)
-        logger.info(`访问 http://localhost:${port} 打开管理面板`)
-    })
+    return new Promise((resolve, reject) => {
+        let settled = false
 
-    // 注入 WebSocket 支持
-    if (injectWebSocket) {
-        injectWebSocket(server)
-        logger.info('WebSocket 推送已启用')
-    }
+        const server = serve({ fetch: app.fetch, port, hostname: SERVER_CONFIG.HOST }, () => {
+            logger.info(`服务器启动在端口 ${port}`)
+            logger.info(`访问 http://localhost:${port} 打开管理面板`)
+            settled = true
+            resolve()
+        })
+
+        server.once('error', (error) => {
+            logger.error(`服务器启动失败: ${error}`)
+            if (!settled) {
+                settled = true
+                reject(error)
+            }
+        })
+
+        // 注入 WebSocket 支持
+        if (injectWebSocket) {
+            injectWebSocket(server)
+            logger.info('WebSocket 推送已启用')
+        }
+    })
 }

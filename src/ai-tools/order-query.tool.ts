@@ -17,6 +17,9 @@ export interface OrderQueryResult {
         orderId: string
         itemTitle: string
         price: string
+        unitPrice: string
+        buyAmount: number
+        totalAmount: string
         status: string
         orderTime: string
         payTime: string | null
@@ -38,7 +41,7 @@ export function queryBuyerOrders(ctx: OrderQueryContext): OrderQueryResult {
 
     try {
         const rows = db.prepare(`
-            SELECT order_id, item_title, price, status, status_text,
+            SELECT order_id, item_title, price, buy_amount, total_amount, status, status_text,
                    order_time, pay_time, ship_time
             FROM orders
             WHERE account_id = ? AND buyer_user_id = ?
@@ -54,6 +57,9 @@ export function queryBuyerOrders(ctx: OrderQueryContext): OrderQueryResult {
             orderId: row.order_id,
             itemTitle: row.item_title || '未知商品',
             price: row.price || '0',
+            unitPrice: row.price || '0',
+            buyAmount: row.buy_amount ?? 1,
+            totalAmount: row.total_amount || row.price || '0',
             status: row.status_text || ORDER_STATUS_TEXT[row.status] || '未知状态',
             orderTime: row.order_time,
             payTime: row.pay_time,
@@ -73,7 +79,7 @@ export const orderQueryToolDefinition = {
     type: 'function' as const,
     function: {
         name: 'query_buyer_orders',
-        description: '查询当前对话买家的订单信息，包括订单号、商品、价格、状态等',
+        description: '查询当前对话买家的订单信息，包括订单号、商品、单价、数量、总价、状态等',
         parameters: {
             type: 'object',
             properties: {},

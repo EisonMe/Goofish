@@ -29,7 +29,7 @@ export function getSetting(key: string): string | null {
             return decrypt(row.value)
         } catch (e) {
             console.error(`解密设置 ${key} 失败:`, e)
-            return row.value // 解密失败时返回原始值
+            return null // 解密失败时返回 null，避免返回密文
         }
     }
     
@@ -72,12 +72,14 @@ export const AI_SETTINGS_KEYS = {
     SYSTEM_PROMPT: 'ai_system_prompt'
 }
 
+export const DEFAULT_AI_MODEL = 'deepseek-v3.1-terminus'
+
 // 获取 AI 设置
 export function getAISettings() {
     return {
         baseUrl: getSetting(AI_SETTINGS_KEYS.BASE_URL) || '',
         apiKey: getSetting(AI_SETTINGS_KEYS.API_KEY) || '',
-        model: getSetting(AI_SETTINGS_KEYS.MODEL) || 'gpt-3.5-turbo',
+        model: getSetting(AI_SETTINGS_KEYS.MODEL) || DEFAULT_AI_MODEL,
         systemPrompt: getSetting(AI_SETTINGS_KEYS.SYSTEM_PROMPT) || ''
     }
 }

@@ -71,7 +71,7 @@ export function markConversationRead(accountId: string, chatId: string) {
 
 // 获取对话消息（分页）
 export function getConversationMessages(accountId: string, chatId: string, limit = 50, beforeId?: number): DbConversationMessage[] {
-    if (beforeId) {
+    if (beforeId != null && beforeId > 0) {
         const stmt = db.prepare(`
             SELECT * FROM conversation_messages
             WHERE account_id = ? AND chat_id = ? AND id < ?
@@ -91,6 +91,22 @@ export function getConversationMessages(accountId: string, chatId: string, limit
 export function getConversationMessageCount(accountId: string, chatId: string): number {
     const stmt = db.prepare('SELECT COUNT(*) as count FROM conversation_messages WHERE account_id = ? AND chat_id = ?')
     return (stmt.get(accountId, chatId) as { count: number }).count
+}
+
+// 批量获取多个对话的消息数
+export function getConversationMessageCountsBatch(
+    pairs: Array<{ accountId: string; chatId: string }>
+): Map<string, number> {
+    const result = new Map<string, number>()
+    if (pairs.length === 0) return result
+    const stmt = db.prepare(
+        'SELECT account_id, chat_id, COUNT(*) as count FROM conversation_messages WHERE account_id = ? AND chat_id = ? GROUP BY account_id, chat_id'
+    )
+    for (const { accountId, chatId } of pairs) {
+        const row = stmt.get(accountId, chatId) as { count: number } | undefined
+        result.set(`${accountId}:${chatId}`, row?.count ?? 0)
+    }
+    return result
 }
 
 // 添加消息

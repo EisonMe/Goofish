@@ -1,6 +1,6 @@
 import { GoofishClient } from './client.js'
 import { createLogger } from '../core/logger.js'
-import { getEnabledAccounts, updateAccountStatus } from '../db/index.js'
+import { getAccountStatus, getEnabledAccounts, updateAccountStatus } from '../db/index.js'
 import type { MessageCallback } from '../types/index.js'
 
 const logger = createLogger('Ws:Manager')
@@ -45,7 +45,8 @@ export class ClientManager {
                 return true
             } else {
                 logger.error(`账号 ${accountId} 启动失败`)
-                updateAccountStatus({ accountId, connected: false, errorMessage: '启动失败' })
+                const currentError = getAccountStatus(accountId)?.errorMessage
+                updateAccountStatus({ accountId, connected: false, errorMessage: currentError || '启动失败' })
                 return false
             }
         } catch (e: any) {
@@ -87,12 +88,16 @@ export class ClientManager {
     // 获取客户端
     getClient(accountId: string): GoofishClient | undefined {
         const client = this.clients.get(accountId)
-        // 检查客户端是否仍在运行
-        if (client && !client.isConnected()) {
-            logger.warn(`账号 ${accountId} 连接已断开，正在清理客户端`)
-            this.stopClient(accountId)
+        if (!client) {
             return undefined
         }
+
+        if (!client.isRunning()) {
+            logger.warn(`账号 ${accountId} 客户端已不在运行态，正在清理客户端`)
+            this.clients.delete(accountId)
+            return undefined
+        }
+
         return client
     }
 

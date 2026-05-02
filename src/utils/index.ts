@@ -4,4 +4,4 @@
 
 export { generateMid, generateUuid, generateDeviceId, generateSign } from './crypto.js'
 export { parseCookies, stringifyCookies, mergeCookies, parseSetCookieHeaders } from './cookies.js'
-export { decryptMessagePack } from './msgpack.js'
+export { decodeMessagePack } from './msgpack.js'

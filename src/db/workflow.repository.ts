@@ -1,14 +1,58 @@
-/**
+﻿/**
  * 发货流程数据仓库
  */
 
 import { db } from './connection.js'
+import { createLogger } from '../core/logger.js'
 import type {
     Workflow,
     WorkflowDefinition,
     WorkflowExecution,
     WorkflowExecutionStatus
 } from '../types/workflow.types.js'
+
+const logger = createLogger('Db:Workflow')
+
+function hasOwnField<T extends object>(obj: T, key: keyof T): boolean {
+    return Object.prototype.hasOwnProperty.call(obj, key)
+}
+
+function isWorkflowDefinition(value: unknown): value is WorkflowDefinition {
+    if (!value || typeof value !== 'object') return false
+    const candidate = value as Partial<WorkflowDefinition>
+    return Array.isArray(candidate.nodes) && Array.isArray(candidate.connections)
+}
+
+function parseJson<T>(raw: string | null | undefined, fallback: T, label: string): T {
+    if (!raw) return fallback
+
+    try {
+        return JSON.parse(raw) as T
+    } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        logger.warn(`${label} JSON 解析失败: ${message}`)
+        return fallback
+    }
+}
+
+function parseWorkflowRow(row: any): Workflow | null {
+    const definition = parseJson<unknown>(row.definition, null, `workflow#${row.id}.definition`)
+    if (!isWorkflowDefinition(definition)) {
+        logger.warn(`跳过无效流程记录 id=${row.id}, name=${row.name}: definition 结构不合法`)
+        return null
+    }
+
+    return {
+        id: row.id,
+        name: row.name,
+        description: row.description,
+        definition,
+        isDefault: Boolean(row.is_default),
+        enabled: Boolean(row.enabled),
+        createdAt: row.created_at,
+        updatedAt: row.updated_at
+    }
+}
 
 // 获取所有流程
 export function getWorkflows(): Workflow[] {
@@ -17,16 +61,9 @@ export function getWorkflows(): Workflow[] {
         FROM workflows ORDER BY is_default DESC, id ASC
     `)
     const rows = stmt.all() as any[]
-    return rows.map(row => ({
-        id: row.id,
-        name: row.name,
-        description: row.description,
-        definition: JSON.parse(row.definition),
-        isDefault: Boolean(row.is_default),
-        enabled: Boolean(row.enabled),
-        createdAt: row.created_at,
-        updatedAt: row.updated_at
-    }))
+    return rows
+        .map(parseWorkflowRow)
+        .filter((workflow): workflow is Workflow => workflow !== null)
 }
 
 // 获取单个流程
@@ -37,16 +74,7 @@ export function getWorkflowById(id: number): Workflow | null {
     `)
     const row = stmt.get(id) as any
     if (!row) return null
-    return {
-        id: row.id,
-        name: row.name,
-        description: row.description,
-        definition: JSON.parse(row.definition),
-        isDefault: Boolean(row.is_default),
-        enabled: Boolean(row.enabled),
-        createdAt: row.created_at,
-        updatedAt: row.updated_at
-    }
+    return parseWorkflowRow(row)
 }
 
 // 获取默认流程
@@ -57,16 +85,7 @@ export function getDefaultWorkflow(): Workflow | null {
     `)
     const row = stmt.get() as any
     if (!row) return null
-    return {
-        id: row.id,
-        name: row.name,
-        description: row.description,
-        definition: JSON.parse(row.definition),
-        isDefault: Boolean(row.is_default),
-        enabled: Boolean(row.enabled),
-        createdAt: row.created_at,
-        updatedAt: row.updated_at
-    }
+    return parseWorkflowRow(row)
 }
 
 // 创建流程
@@ -76,7 +95,6 @@ export function createWorkflow(data: {
     definition: WorkflowDefinition
     isDefault?: boolean
 }): number {
-    // 如果设为默认，先取消其他默认
     if (data.isDefault) {
         db.prepare('UPDATE workflows SET is_default = 0').run()
     }
@@ -105,7 +123,6 @@ export function updateWorkflow(id: number, data: {
     const workflow = getWorkflowById(id)
     if (!workflow) return false
 
-    // 如果设为默认，先取消其他默认
     if (data.isDefault) {
         db.prepare('UPDATE workflows SET is_default = 0 WHERE id != ?').run(id)
     }
@@ -134,7 +151,7 @@ export function updateWorkflow(id: number, data: {
 // 删除流程
 export function deleteWorkflow(id: number): boolean {
     const workflow = getWorkflowById(id)
-    if (!workflow || workflow.isDefault) return false // 不能删除默认流程
+    if (!workflow || workflow.isDefault) return false
 
     const stmt = db.prepare('DELETE FROM workflows WHERE id = ?')
     stmt.run(id)
@@ -181,7 +198,7 @@ export function getWorkflowExecution(id: number): WorkflowExecution | null {
     return mapExecutionRow(row)
 }
 
-// 根据订单ID获取执行记录
+// 根据订单 ID 获取执行记录
 export function getWorkflowExecutionByOrderId(orderId: string): WorkflowExecution | null {
     const stmt = db.prepare(`
         SELECT id, workflow_id, order_id, account_id, rule_id, status, 
@@ -204,6 +221,7 @@ export function getWaitingExecutions(accountId: string): WorkflowExecution[] {
                created_at, updated_at
         FROM workflow_executions 
         WHERE account_id = ? AND waiting_for_reply = 1 AND status = 'waiting'
+        ORDER BY updated_at DESC
     `)
     const rows = stmt.all(accountId) as any[]
     return rows.map(mapExecutionRow)
@@ -217,30 +235,50 @@ export function updateWorkflowExecution(id: number, data: {
     expectedKeywords?: string[] | null
     context?: Record<string, any>
 }): boolean {
+    const hasCurrentNodeId = hasOwnField(data, 'currentNodeId')
+    const hasWaitingForReply = hasOwnField(data, 'waitingForReply')
+    const hasExpectedKeywords = hasOwnField(data, 'expectedKeywords')
+    const hasContext = hasOwnField(data, 'context')
+
     const stmt = db.prepare(`
         UPDATE workflow_executions SET
             status = COALESCE(?, status),
-            current_node_id = COALESCE(?, current_node_id),
-            waiting_for_reply = COALESCE(?, waiting_for_reply),
-            expected_keywords = COALESCE(?, expected_keywords),
-            context = COALESCE(?, context),
+            current_node_id = CASE WHEN ? THEN ? ELSE current_node_id END,
+            waiting_for_reply = CASE WHEN ? THEN ? ELSE waiting_for_reply END,
+            expected_keywords = CASE WHEN ? THEN ? ELSE expected_keywords END,
+            context = CASE WHEN ? THEN ? ELSE context END,
             updated_at = CURRENT_TIMESTAMP
         WHERE id = ?
     `)
     stmt.run(
         data.status ?? null,
+        hasCurrentNodeId ? 1 : 0,
         data.currentNodeId !== undefined ? data.currentNodeId : null,
+        hasWaitingForReply ? 1 : 0,
         data.waitingForReply !== undefined ? (data.waitingForReply ? 1 : 0) : null,
+        hasExpectedKeywords ? 1 : 0,
         data.expectedKeywords !== undefined
             ? (data.expectedKeywords ? JSON.stringify(data.expectedKeywords) : null)
             : null,
-        data.context ? JSON.stringify(data.context) : null,
+        hasContext ? 1 : 0,
+        hasContext ? (data.context ? JSON.stringify(data.context) : null) : null,
         id
     )
     return true
 }
 
 function mapExecutionRow(row: any): WorkflowExecution {
+    const expectedKeywords = parseJson<unknown>(
+        row.expected_keywords,
+        null,
+        `workflow_execution#${row.id}.expected_keywords`
+    )
+    const context = parseJson<Record<string, any>>(
+        row.context,
+        {},
+        `workflow_execution#${row.id}.context`
+    )
+
     return {
         id: row.id,
         workflowId: row.workflow_id,
@@ -250,8 +288,8 @@ function mapExecutionRow(row: any): WorkflowExecution {
         status: row.status,
         currentNodeId: row.current_node_id,
         waitingForReply: Boolean(row.waiting_for_reply),
-        expectedKeywords: row.expected_keywords ? JSON.parse(row.expected_keywords) : null,
-        context: row.context ? JSON.parse(row.context) : {},
+        expectedKeywords: Array.isArray(expectedKeywords) ? expectedKeywords : null,
+        context: context && typeof context === 'object' ? context : {},
         createdAt: row.created_at,
         updatedAt: row.updated_at
     }

@@ -40,3 +40,10 @@ npm-debug.log*
 
 # Reference projects
 .ReferenceProjects/
+
+# Local backups and generated exports
+backups/
+exports/
+tmp/
+src.bak.*/
+*.bak

@@ -70,6 +70,26 @@ export class GoofishAccountsComponent implements OnInit, OnDestroy {
     return this.status()?.clients.some((c) => c.accountId === accountId && c.connected) ?? false;
   }
 
+  getAccountError(account: Account): string {
+    if (this.isConnected(account.id)) return '';
+    return account.status?.errorMessage?.trim() || '';
+  }
+
+  getAccountStatusLabel(account: Account): string {
+    const error = this.getAccountError(account);
+    if (!error) return '离线';
+
+    if (error.includes('FAIL_SYS_SESSION_EXPIRED') || error.includes('Session过期') || error.includes('SESSION_EXPIRED')) {
+      return '刷新码失效';
+    }
+
+    if (error.includes('Token') || error.includes('token')) {
+      return 'Token异常';
+    }
+
+    return '离线异常';
+  }
+
   formatTime(time?: string): string {
     return time ? new Date(time).toLocaleString() : '-';
   }

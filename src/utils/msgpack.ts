@@ -7,17 +7,26 @@ class MessagePackDecoder {
         this.data = data
     }
 
+    private ensureAvailable(count: number): void {
+        if (this.pos + count > this.data.length) {
+            throw new Error(`MessagePack decode error: need ${count} bytes at pos ${this.pos}, but only ${this.data.length - this.pos} available`)
+        }
+    }
+
     private readByte(): number {
+        this.ensureAvailable(1)
         return this.data[this.pos++]
     }
 
     private readBytes(count: number): Buffer {
+        this.ensureAvailable(count)
         const result = this.data.subarray(this.pos, this.pos + count)
         this.pos += count
         return result
     }
 
     private readUint32(): number {
+        this.ensureAvailable(4)
         const val = this.data.readUInt32BE(this.pos)
         this.pos += 4
         return val
@@ -38,18 +47,18 @@ class MessagePackDecoder {
         if (fmt === 0xc2) return false
         if (fmt === 0xc3) return true
         if (fmt === 0xc4) return this.readBytes(this.readByte())
-        if (fmt === 0xc5) { const len = this.data.readUInt16BE(this.pos); this.pos += 2; return this.readBytes(len) }
+        if (fmt === 0xc5) { this.ensureAvailable(2); const len = this.data.readUInt16BE(this.pos); this.pos += 2; return this.readBytes(len) }
         if (fmt === 0xc6) return this.readBytes(this.readUint32())
         if (fmt === 0xcc) return this.readByte()
-        if (fmt === 0xcd) { const val = this.data.readUInt16BE(this.pos); this.pos += 2; return val }
+        if (fmt === 0xcd) { this.ensureAvailable(2); const val = this.data.readUInt16BE(this.pos); this.pos += 2; return val }
         if (fmt === 0xce) return this.readUint32()
-        if (fmt === 0xcf) { const val = this.data.readBigUInt64BE(this.pos); this.pos += 8; return Number(val) }
+        if (fmt === 0xcf) { this.ensureAvailable(8); const val = this.data.readBigUInt64BE(this.pos); this.pos += 8; return Number(val) }
         if (fmt === 0xd9) return this.readString(this.readByte())
-        if (fmt === 0xda) { const len = this.data.readUInt16BE(this.pos); this.pos += 2; return this.readString(len) }
+        if (fmt === 0xda) { this.ensureAvailable(2); const len = this.data.readUInt16BE(this.pos); this.pos += 2; return this.readString(len) }
         if (fmt === 0xdb) return this.readString(this.readUint32())
-        if (fmt === 0xdc) { const len = this.data.readUInt16BE(this.pos); this.pos += 2; return this.decodeArray(len) }
+        if (fmt === 0xdc) { this.ensureAvailable(2); const len = this.data.readUInt16BE(this.pos); this.pos += 2; return this.decodeArray(len) }
         if (fmt === 0xdd) return this.decodeArray(this.readUint32())
-        if (fmt === 0xde) { const len = this.data.readUInt16BE(this.pos); this.pos += 2; return this.decodeMap(len) }
+        if (fmt === 0xde) { this.ensureAvailable(2); const len = this.data.readUInt16BE(this.pos); this.pos += 2; return this.decodeMap(len) }
         if (fmt === 0xdf) return this.decodeMap(this.readUint32())
         if (fmt >= 0xe0) return fmt - 0x100
 
@@ -74,7 +83,7 @@ class MessagePackDecoder {
     }
 }
 
-export function decryptMessagePack(data: string): any {
+export function decodeMessagePack(data: string): any {
     let padded = data
     const missing = data.length % 4
     if (missing) padded += '='.repeat(4 - missing)

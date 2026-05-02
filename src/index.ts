@@ -28,11 +28,9 @@ async function main() {
         messageStore.add(msg)
         conversationStore.addIncoming(accountId, msg)
 
-        // 处理订单状态消息
-        if (msg.isOrderMessage && msg.orderId) {
-            logger.info(`订单消息: orderId=${msg.orderId}`)
+        if (msg.orderId) {
+            logger.info(`订单线索消息: orderId=${msg.orderId}${msg.isOrderMessage ? '（订单状态消息）' : '（普通消息提取）'}`)
             handleOrderMessage(accountId, msg.orderId, msg.chatId)
-            // 异步获取订单详情
             fetchOrderDetailAsync(accountId, msg.orderId)
         }
 
@@ -44,7 +42,7 @@ async function main() {
     setClientManager(clientManager)
 
     // 启动 API 服务器
-    startServer(SERVER_CONFIG.PORT)
+    await startServer(SERVER_CONFIG.PORT)
 
     // 从数据库加载并启动所有启用的账号
     await clientManager.startAll()

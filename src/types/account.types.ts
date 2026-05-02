@@ -21,6 +21,7 @@ export interface AccountStatus {
     connected: boolean
     lastHeartbeat?: string
     lastTokenRefresh?: string
+    lastSyncTimestamp?: number
     errorMessage?: string
 }
 
@@ -51,5 +52,6 @@ export interface UpdateAccountStatusParams {
     connected?: boolean
     lastHeartbeat?: string
     lastTokenRefresh?: string
+    lastSyncTimestamp?: number
     errorMessage?: string
 }
