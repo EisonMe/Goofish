@@ -22,6 +22,7 @@ export { db, closeDatabase }
 export {
     getEnabledAccounts,
     getAllAccounts,
+    getAccountsByIds,
     getAccount,
     upsertAccount,
     updateAccountUserInfo,
@@ -41,6 +42,7 @@ export {
     markConversationRead,
     getConversationMessages,
     getConversationMessageCount,
+    getConversationMessageCountsBatch,
     addConversationMessage
 } from './conversation.repository.js'
 
@@ -64,6 +66,7 @@ export {
     getOrders,
     getOrderCount,
     getOrderById,
+    getLatestOrderByChatId,
     upsertOrder,
     updateOrderStatus,
     deleteOrder
@@ -76,7 +79,8 @@ export {
     getSettings,
     getAISettings,
     saveAISettings,
-    AI_SETTINGS_KEYS
+    AI_SETTINGS_KEYS,
+    DEFAULT_AI_MODEL
 } from './settings.repository.js'
 
 export {
@@ -91,10 +95,14 @@ export {
     getStockStats,
     addStockItems,
     consumeStock,
+    consumeStockBatch,
+    restoreStockItems,
     clearStock,
     addDeliveryLog,
     getDeliveryLogs,
-    hasDelivered
+    getLatestDeliveryLog,
+    hasDelivered,
+    getDeliveredQuantity
 } from './autosell.repository.js'
 
 export {

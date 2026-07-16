@@ -6,6 +6,10 @@ frontend/node_modules/
 dist/
 public/
 frontend/dist/
+electron-dist/
+release/
+build/icon.png
+build/tray/
 docs/.vitepress/dist/
 docs/.vitepress/cache/
 
@@ -40,3 +44,10 @@ npm-debug.log*
 
 # Reference projects
 .ReferenceProjects/
+
+# Local backups and generated exports
+backups/
+exports/
+tmp/
+src.bak.*/
+*.bak

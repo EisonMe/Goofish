@@ -15,6 +15,8 @@ export interface AutoReplyRule {
     matchPattern: string
     replyContent: string
     accountId: string | null
+    itemGroupId: number | null
+    itemGroupName?: string | null
     excludeMatch: boolean  // 排除匹配：匹配其他规则未匹配的内容
     createdAt?: string
     updatedAt?: string
@@ -30,6 +32,8 @@ export interface DbAutoReplyRule {
     match_pattern: string
     reply_content: string
     account_id: string | null
+    item_group_id: number | null
+    item_group_name?: string | null
     exclude_match: number  // 0 或 1
     created_at: string
     updated_at: string
@@ -44,6 +48,7 @@ export interface CreateAutoReplyRuleParams {
     matchPattern: string
     replyContent: string
     accountId?: string | null
+    itemGroupId?: number | null
     excludeMatch?: boolean
 }
 
@@ -56,6 +61,7 @@ export interface UpdateAutoReplyRuleParams {
     matchPattern?: string
     replyContent?: string
     accountId?: string | null
+    itemGroupId?: number | null
     excludeMatch?: boolean
 }
 

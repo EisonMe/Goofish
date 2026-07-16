@@ -11,6 +11,7 @@ const SESSION_EXPIRED_ERRORS = ['FAIL_SYS_SESSION_EXPIRED', 'SESSION_EXPIRED']
 export class TokenManager {
     private currentToken: string | null = null
     private lastRefreshTime = 0
+    private lastError: string | null = null
     private deviceId: string
     private accountId: string
 
@@ -161,6 +162,7 @@ export class TokenManager {
     async refresh(): Promise<string | null> {
         try {
             logger.info(`[${this.accountId}] 开始刷新Token...`)
+            this.lastError = null
 
             // 第一次请求
             let result = await this.doTokenRequest()
@@ -188,15 +190,22 @@ export class TokenManager {
             if (result.success && result.token) {
                 this.currentToken = result.token
                 this.lastRefreshTime = Date.now()
+                this.lastError = null
                 logger.info(`[${this.accountId}] Token刷新成功`)
                 return this.currentToken
             }
 
-            logger.error(`[${this.accountId}] Token刷新失败: ${result.error}`)
+            this.lastError = result.error || 'Token刷新失败'
+            logger.error(`[${this.accountId}] Token刷新失败: ${this.lastError}`)
             return null
         } catch (e) {
-            logger.error(`[${this.accountId}] Token刷新异常: ${e}`)
+            this.lastError = String(e)
+            logger.error(`[${this.accountId}] Token刷新异常: ${this.lastError}`)
             return null
         }
+    }
+
+    getLastError(): string | null {
+        return this.lastError
     }
 }

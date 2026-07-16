@@ -9,11 +9,61 @@ import type { WSContext } from 'hono/ws'
 import { createLogger } from '../../core/logger.js'
 import { appEvents, Events } from '../../core/event-emitter.js'
 import { getOrders, getOrderCount } from '../../db/order.repository.js'
-import { getAllAccounts } from '../../db/account.repository.js'
+import { getAccountStatus, getAllAccounts } from '../../db/account.repository.js'
 import { getAllConversations } from '../../services/conversation.service.js'
 import type { ClientManager } from '../../websocket/client.manager.js'
 
 const logger = createLogger('Api:WS')
+
+function parseOptionalNumber(value: string | number | undefined): number | undefined {
+    if (value === undefined || value === null || value === '') {
+        return undefined
+    }
+
+    const parsed = typeof value === 'number' ? value : Number(value)
+    return Number.isFinite(parsed) ? parsed : undefined
+}
+
+function parseOptionalBoolean(value: string | number | undefined): boolean | undefined {
+    if (value === undefined || value === null || value === '') {
+        return undefined
+    }
+
+    if (typeof value === 'number') {
+        return value !== 0
+    }
+
+    const normalized = value.trim().toLowerCase()
+    if (['1', 'true', 'yes', 'on'].includes(normalized)) {
+        return true
+    }
+    if (['0', 'false', 'no', 'off'].includes(normalized)) {
+        return false
+    }
+
+    return undefined
+}
+
+function buildOrderQueryParams(params: Record<string, string | number | undefined>) {
+    return {
+        accountId: params.accountId as string | undefined,
+        status: parseOptionalNumber(params.status),
+        keyword: (params.keyword as string | undefined)?.trim() || undefined,
+        hasRefund: parseOptionalBoolean(params.hasRefund),
+        pendingRedelivery: parseOptionalBoolean(params.pendingRedelivery),
+        orderTimeStart: (params.orderTimeStart as string | undefined)?.trim() || undefined
+    }
+}
+
+function getOrderPaginationParams(params: Record<string, string | number | undefined>) {
+    const limit = parseOptionalNumber(params.ordersLimit)
+    const offset = parseOptionalNumber(params.ordersOffset)
+
+    return {
+        limit: limit !== undefined && limit > 0 ? Math.floor(limit) : 50,
+        offset: offset !== undefined && offset >= 0 ? Math.floor(offset) : 0
+    }
+}
 
 // 存储所有 WebSocket 连接
 const wsClients = new Set<{
@@ -46,16 +96,14 @@ export function initWSEvents(getClientManager: () => ClientManager | null) {
     // 订单更新
     appEvents.on(Events.ORDERS_UPDATED, () => {
         broadcast('orders', (params) => {
+            const query = buildOrderQueryParams(params)
+            const pagination = getOrderPaginationParams(params)
             const orders = getOrders({
-                accountId: params.accountId as string | undefined,
-                status: params.status as number | undefined,
-                limit: 50,
-                offset: 0
+                ...query,
+                limit: pagination.limit,
+                offset: pagination.offset
             })
-            const total = getOrderCount({
-                accountId: params.accountId as string | undefined,
-                status: params.status as number | undefined
-            })
+            const total = getOrderCount(query)
             return { orders, total }
         })
     })
@@ -63,7 +111,10 @@ export function initWSEvents(getClientManager: () => ClientManager | null) {
     // 账号更新
     appEvents.on(Events.ACCOUNTS_UPDATED, () => {
         broadcast('accounts', () => {
-            const accounts = getAllAccounts()
+            const accounts = getAllAccounts().map(account => ({
+                ...account,
+                status: getAccountStatus(account.id)
+            }))
             const clientManager = getClientManager()
             const clients = clientManager?.getStatus() || []
             return { accounts, clients }
@@ -109,7 +160,7 @@ export function createWSPushHandler(getClientManager: () => ClientManager | null
                         client.subscriptions.add(evt)
                     }
                     if (msg.params) {
-                        Object.assign(client.params, msg.params)
+                        client.params = { ...msg.params }
                     }
 
                     // 立即发送当前数据
@@ -129,7 +180,7 @@ export function createWSPushHandler(getClientManager: () => ClientManager | null
 
                 // 更新参数: { action: 'updateParams', params: { accountId: '...' } }
                 if (msg.action === 'updateParams' && msg.params) {
-                    Object.assign(client.params, msg.params)
+                    client.params = { ...msg.params }
                     // 重新发送订阅的数据
                     for (const evt of client.subscriptions) {
                         sendInitialData(ws, evt, client.params, getClientManager)
@@ -172,21 +223,22 @@ function sendInitialData(
 
         switch (event) {
             case 'orders': {
+                const query = buildOrderQueryParams(params)
+                const pagination = getOrderPaginationParams(params)
                 const orders = getOrders({
-                    accountId: params.accountId as string | undefined,
-                    status: params.status as number | undefined,
-                    limit: 50,
-                    offset: 0
+                    ...query,
+                    limit: pagination.limit,
+                    offset: pagination.offset
                 })
-                const total = getOrderCount({
-                    accountId: params.accountId as string | undefined,
-                    status: params.status as number | undefined
-                })
+                const total = getOrderCount(query)
                 data = { orders, total }
                 break
             }
             case 'accounts': {
-                const accounts = getAllAccounts()
+                const accounts = getAllAccounts().map(account => ({
+                    ...account,
+                    status: getAccountStatus(account.id)
+                }))
                 const clientManager = getClientManager()
                 const clients = clientManager?.getStatus() || []
                 data = { accounts, clients }
@@ -211,4 +263,15 @@ function sendInitialData(
 // 获取当前连接数（用于调试）
 export function getWSClientCount() {
     return wsClients.size
+}
+
+export function closeWSClients() {
+    for (const client of wsClients) {
+        try {
+            client.ws.close(1001, 'Application shutdown')
+        } catch {
+            // 连接可能已经关闭
+        }
+    }
+    wsClients.clear()
 }

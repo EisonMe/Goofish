@@ -77,7 +77,7 @@ export class BotAutosellComponent implements OnInit {
                 g.id.includes(search)
             );
         }
-        return goods.slice(0, 20);
+        return goods;
     });
 
     selectedGoods = computed(() => {
@@ -86,15 +86,47 @@ export class BotAutosellComponent implements OnInit {
         return this.allGoods().find(g => g.id === itemId) || null;
     });
 
+    sharedStockSourceOptions = computed(() => {
+        const currentRuleId = this.editingRule()?.id ?? null;
+
+        return this.rules().filter(rule => {
+            if (rule.deliveryType !== 'stock') return false;
+            if (rule.id === currentRuleId) return false;
+            return true;
+        });
+    });
+
+    selectedSharedStockSource = computed(() => {
+        const sourceRuleId = this.formData().sharedStockRuleId;
+        if (!sourceRuleId) return null;
+        return this.rules().find(rule => rule.id === sourceRuleId) || null;
+    });
+
+    stockModalRule = computed(() => {
+        const ruleId = this.stockRuleId();
+        if (!ruleId) return null;
+        return this.rules().find(rule => rule.id === ruleId) || null;
+    });
+
+    stockModalSharedSource = computed(() => {
+        const sourceRuleId = this.stockModalRule()?.sharedStockRuleId;
+        if (!sourceRuleId) return null;
+        return this.rules().find(rule => rule.id === sourceRuleId) || null;
+    });
+
     formData = signal({
         name: '',
         enabled: true,
         itemId: null as string | null,
         accountId: null as string | null,
+        matchPrice: '',
+        priceMin: '',
+        priceMax: '',
         deliveryType: 'fixed' as DeliveryType,
         deliveryContent: '',
         triggerOn: 'paid' as TriggerOn,
         workflowId: null as number | null,
+        sharedStockRuleId: null as number | null,
         apiUrl: '',
         apiMethod: 'GET' as 'GET' | 'POST',
         apiHeaders: '',
@@ -115,9 +147,13 @@ export class BotAutosellComponent implements OnInit {
 
     ngOnInit() {
         this.loadRules();
-        this.loadAccounts();
-        this.loadAllGoods();
         this.loadWorkflows();
+        void this.initializeAccountsAndGoods();
+    }
+
+    private async initializeAccountsAndGoods() {
+        await this.loadAccounts();
+        await this.loadAllGoods();
     }
 
     async loadWorkflows() {
@@ -132,22 +168,71 @@ export class BotAutosellComponent implements OnInit {
     async loadAccounts() {
         try {
             const res = await this.accountService.getAccounts();
-            this.accounts.set(res.accounts.filter(a => a.enabled));
+            const enabledAccounts = res.accounts.filter(a => a.enabled);
+            this.accounts.set(enabledAccounts);
+            return enabledAccounts;
         } catch (e) {
             console.error('加载账号失败', e);
+            return [] as Account[];
         }
     }
 
     async loadAllGoods() {
         this.loadingGoods.set(true);
         try {
-            const res = await this.goodsService.getGoods();
-            this.allGoods.set(res.items);
+            const selectedAccountId = this.formData().accountId;
+            const accounts = this.accounts().length > 0 ? this.accounts() : await this.loadAccounts();
+
+            if (selectedAccountId) {
+                const account = accounts.find(item => item.id === selectedAccountId) || null;
+                this.allGoods.set(await this.fetchGoodsForAccount(selectedAccountId, account?.nickname || undefined));
+                return;
+            }
+
+            const merged = new Map<string, GoodsItem>();
+
+            for (const account of accounts) {
+                const items = await this.fetchGoodsForAccount(account.id, account.nickname || undefined);
+                for (const goods of items) {
+                    if (!goods.id || !goods.accountId) continue;
+                    merged.set(`${goods.accountId}::${goods.id}`, goods);
+                }
+            }
+
+            this.allGoods.set(Array.from(merged.values()));
         } catch (e) {
             console.error('加载商品失败', e);
         } finally {
             this.loadingGoods.set(false);
         }
+    }
+
+    private async fetchGoodsForAccount(accountId: string, accountNickname?: string): Promise<GoodsItem[]> {
+        const merged = new Map<string, GoodsItem>();
+        let page = 1;
+
+        while (true) {
+            const res = await this.goodsService.getAccountGoods(accountId, page);
+            const items = (res.items || []).map(goods => ({
+                ...goods,
+                accountId,
+                accountNickname: goods.accountNickname || accountNickname
+            }));
+
+            for (const goods of items) {
+                if (goods.id) {
+                    merged.set(goods.id, goods);
+                }
+            }
+
+            if (!res.nextPage || items.length === 0) {
+                break;
+            }
+
+            page += 1;
+        }
+
+        return Array.from(merged.values());
     }
 
     async loadRules() {
@@ -170,10 +255,14 @@ export class BotAutosellComponent implements OnInit {
             enabled: rule.enabled,
             itemId: rule.itemId,
             accountId: rule.accountId,
+            matchPrice: rule.matchPrice || '',
+            priceMin: rule.priceMin || '',
+            priceMax: rule.priceMax || '',
             deliveryType: rule.deliveryType,
             deliveryContent: rule.deliveryContent || '',
             triggerOn: rule.triggerOn,
             workflowId: rule.workflowId,
+            sharedStockRuleId: rule.sharedStockRuleId,
             apiUrl: apiConfig?.url || '',
             apiMethod: apiConfig?.method || 'GET',
             apiHeaders: apiConfig?.headers ? JSON.stringify(apiConfig.headers, null, 2) : '',
@@ -195,10 +284,14 @@ export class BotAutosellComponent implements OnInit {
             enabled: true,
             itemId: null,
             accountId: null,
+            matchPrice: '',
+            priceMin: '',
+            priceMax: '',
             deliveryType: 'fixed',
             deliveryContent: '',
             triggerOn: 'paid',
             workflowId: null,
+            sharedStockRuleId: null,
             apiUrl: '',
             apiMethod: 'GET',
             apiHeaders: '',
@@ -209,6 +302,25 @@ export class BotAutosellComponent implements OnInit {
         this.stockContent.set('');
     }
 
+    private hasSharedStockSource(ruleId: number | null | undefined): boolean {
+        if (!ruleId) return false;
+        return this.sharedStockSourceOptions().some(rule => rule.id === ruleId);
+    }
+
+    private ensureSharedStockSelectionValid() {
+        const data = this.formData();
+        if (data.deliveryType !== 'stock') {
+            if (data.sharedStockRuleId !== null) {
+                this.formData.update(form => ({ ...form, sharedStockRuleId: null }));
+            }
+            return;
+        }
+
+        if (data.sharedStockRuleId && !this.hasSharedStockSource(data.sharedStockRuleId)) {
+            this.formData.update(form => ({ ...form, sharedStockRuleId: null }));
+        }
+    }
+
     updateField<K extends keyof ReturnType<typeof this.formData>>(
         field: K,
         value: ReturnType<typeof this.formData>[K]
@@ -217,6 +329,10 @@ export class BotAutosellComponent implements OnInit {
         if (field === 'accountId') {
             this.formData.update(f => ({ ...f, itemId: null }));
             this.goodsSearch.set('');
+            void this.loadAllGoods();
+        }
+        if (field === 'accountId' || field === 'deliveryType' || field === 'sharedStockRuleId') {
+            this.ensureSharedStockSelectionValid();
         }
     }
 
@@ -228,11 +344,13 @@ export class BotAutosellComponent implements OnInit {
         }));
         this.goodsSearch.set('');
         this.showGoodsDropdown.set(false);
+        this.ensureSharedStockSelectionValid();
     }
 
     clearGoodsSelection() {
         this.formData.update(f => ({ ...f, itemId: null }));
         this.goodsSearch.set('');
+        this.ensureSharedStockSelectionValid();
     }
 
     onGoodsSearchFocus() {
@@ -267,6 +385,42 @@ export class BotAutosellComponent implements OnInit {
         return goods?.title || itemId;
     }
 
+    getRuleName(ruleId: number | null | undefined): string {
+        if (!ruleId) return '-';
+        return this.rules().find(rule => rule.id === ruleId)?.name || `规则 #${ruleId}`;
+    }
+
+    private getErrorMessage(error: any): string {
+        return error?.error?.error || error?.error?.message || error?.message || '操作失败';
+    }
+
+    private normalizePriceInput(value: string): string | null {
+        const normalized = value.trim().replace(/[￥¥,\s]/g, '');
+        return normalized || null;
+    }
+
+    private isValidPriceInput(value: string | null): boolean {
+        return value === null || /^\d+(?:\.\d{1,2})?$/.test(value);
+    }
+
+    private toComparablePrice(value: string | null): number | null {
+        return value === null ? null : Number(value);
+    }
+
+    getPriceMatchLabel(rule: AutoSellRule): string {
+        if (rule.matchPrice) {
+            return `精确 ¥${rule.matchPrice}`;
+        }
+
+        if (rule.priceMin || rule.priceMax) {
+            const min = rule.priceMin ?? '不限';
+            const max = rule.priceMax ?? '不限';
+            return `区间 ${min} ~ ${max}`;
+        }
+
+        return '全部金额';
+    }
+
     async saveRule() {
         const data = this.formData();
         if (!data.name) {
@@ -275,6 +429,25 @@ export class BotAutosellComponent implements OnInit {
         }
         if (!data.itemId) {
             await this.dialog.alert('提示', '请选择商品');
+            return;
+        }
+
+        const matchPrice = this.normalizePriceInput(data.matchPrice);
+        const priceMin = this.normalizePriceInput(data.priceMin);
+        const priceMax = this.normalizePriceInput(data.priceMax);
+
+        if (!this.isValidPriceInput(matchPrice) || !this.isValidPriceInput(priceMin) || !this.isValidPriceInput(priceMax)) {
+            await this.dialog.alert('提示', '金额格式不正确，请输入最多 2 位小数');
+            return;
+        }
+
+        if (matchPrice && (priceMin || priceMax)) {
+            await this.dialog.alert('提示', '精确金额和价格区间二选一即可');
+            return;
+        }
+
+        if (priceMin && priceMax && this.toComparablePrice(priceMin)! > this.toComparablePrice(priceMax)!) {
+            await this.dialog.alert('提示', '最低金额不能大于最高金额');
             return;
         }
 
@@ -316,7 +489,11 @@ export class BotAutosellComponent implements OnInit {
             deliveryContent: data.deliveryType === 'fixed' ? data.deliveryContent : null,
             apiConfig,
             triggerOn: data.triggerOn,
-            workflowId: data.workflowId
+            workflowId: data.workflowId,
+            sharedStockRuleId: data.deliveryType === 'stock' ? data.sharedStockRuleId : null,
+            matchPrice,
+            priceMin,
+            priceMax
         };
 
         this.saving.set(true);
@@ -331,7 +508,7 @@ export class BotAutosellComponent implements OnInit {
                 ruleId = res.id!;
             }
 
-            if (data.deliveryType === 'stock' && this.stockContent().trim()) {
+            if (data.deliveryType === 'stock' && !data.sharedStockRuleId && this.stockContent().trim()) {
                 const contents = this.stockContent()
                     .split('\n')
                     .map(s => s.trim())
@@ -345,7 +522,7 @@ export class BotAutosellComponent implements OnInit {
             await this.loadRules();
         } catch (e) {
             console.error('保存失败', e);
-            await this.dialog.alert('错误', '保存失败');
+            await this.dialog.alert('错误', this.getErrorMessage(e));
         } finally {
             this.saving.set(false);
         }
@@ -359,8 +536,13 @@ export class BotAutosellComponent implements OnInit {
     async deleteRule(rule: AutoSellRule) {
         const confirmed = await this.dialog.confirm('确认删除', `确定要删除规则 "${rule.name}" 吗？`);
         if (!confirmed) return;
-        await this.service.deleteRule(rule.id);
-        await this.loadRules();
+        try {
+            await this.service.deleteRule(rule.id);
+            await this.loadRules();
+        } catch (e) {
+            console.error('删除规则失败', e);
+            await this.dialog.alert('错误', this.getErrorMessage(e));
+        }
     }
 
     // 库存管理
@@ -413,6 +595,7 @@ export class BotAutosellComponent implements OnInit {
             await this.dialog.alert('成功', `已清空 ${res.count} 条库存`);
         } catch (e) {
             console.error('清空库存失败', e);
+            await this.dialog.alert('错误', this.getErrorMessage(e));
         }
     }
 

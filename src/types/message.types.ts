@@ -9,7 +9,10 @@ export interface ChatMessage {
     msgTime: string
     content: string
     chatId: string
+    itemId?: string
+    itemTitle?: string
     msgId?: string
+    timestamp?: number
     raw: unknown
     // 订单相关信息
     orderId?: string

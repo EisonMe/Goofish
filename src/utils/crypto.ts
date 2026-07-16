@@ -1,8 +1,25 @@
 import crypto from 'crypto'
 
 // 加密密钥，实际部署时应该从环境变量获取
-const ENCRYPTION_KEY = process.env.ENCRYPTION_KEY || 'goofish_credentials_bot_secret_key'
+const RAW_ENCRYPTION_KEY = process.env.ENCRYPTION_KEY || 'goofish_credentials_bot_secret_key'
 const IV_LENGTH = 16 // AES-256 需要 16 字节的初始化向量
+
+function resolveEncryptionKey(): Buffer {
+    const key = RAW_ENCRYPTION_KEY.trim()
+
+    if (/^[0-9a-fA-F]{64}$/.test(key)) {
+        return Buffer.from(key, 'hex')
+    }
+
+    const keyBuffer = Buffer.from(key, 'utf8')
+    if (keyBuffer.length === 32) {
+        return keyBuffer
+    }
+
+    return crypto.createHash('sha256').update(key).digest()
+}
+
+const ENCRYPTION_KEY = resolveEncryptionKey()
 
 export function generateMid(): string {
     const randomPart = Math.floor(Math.random() * 1000)
@@ -47,7 +64,7 @@ export function generateSign(t: string, token: string, data: string): string {
  */
 export function encrypt(text: string): string {
     const iv = crypto.randomBytes(IV_LENGTH)
-    const cipher = crypto.createCipheriv('aes-256-cbc', Buffer.from(ENCRYPTION_KEY), iv)
+    const cipher = crypto.createCipheriv('aes-256-cbc', ENCRYPTION_KEY, iv)
     let encrypted = cipher.update(text, 'utf8', 'base64')
     encrypted += cipher.final('base64')
     return iv.toString('base64') + ':' + encrypted
@@ -60,7 +77,7 @@ export function decrypt(text: string): string {
     const textParts = text.split(':')
     const iv = Buffer.from(textParts.shift()!, 'base64')
     const encryptedText = textParts.join(':')
-    const decipher = crypto.createDecipheriv('aes-256-cbc', Buffer.from(ENCRYPTION_KEY), iv)
+    const decipher = crypto.createDecipheriv('aes-256-cbc', ENCRYPTION_KEY, iv)
     let decrypted = decipher.update(encryptedText, 'base64', 'utf8')
     decrypted += decipher.final('utf8')
     return decrypted
@@ -68,7 +85,15 @@ export function decrypt(text: string): string {
 
 /**
  * 检查字符串是否已加密
+ * 加密格式为 base64(iv):base64(ciphertext)，其中 IV 固定 16 字节
  */
 export function isEncrypted(text: string): boolean {
-    return text.includes(':') && text.split(':').length === 2
+    if (!text.includes(':') || text.split(':').length !== 2) return false
+    const [ivPart, dataPart] = text.split(':')
+    try {
+        const ivBuf = Buffer.from(ivPart, 'base64')
+        return ivBuf.length === IV_LENGTH && dataPart.length > 0 && Buffer.from(dataPart, 'base64').length > 0
+    } catch {
+        return false
+    }
 }

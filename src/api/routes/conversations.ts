@@ -9,8 +9,8 @@ export function createConversationRoutes() {
 
     // 获取对话列表（分页）
     router.get('/', (c) => {
-        const limit = parseInt(c.req.query('limit') || '20')
-        const offset = parseInt(c.req.query('offset') || '0')
+        const limit = Math.max(1, Math.min(100, parseInt(c.req.query('limit') || '20') || 20))
+        const offset = Math.max(0, parseInt(c.req.query('offset') || '0') || 0)
         const { conversations, total } = conversationStore.getAll(limit, offset)
         return c.json({ conversations, total, limit, offset })
     })

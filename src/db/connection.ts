@@ -22,6 +22,10 @@ export const db = new Database(dbPath)
 
 // 启用 WAL 模式提高并发性能
 db.pragma('journal_mode = WAL')
+// 设置 busy_timeout，避免并发访问时直接报 SQLITE_BUSY
+db.pragma('busy_timeout = 5000')
+// 启用外键约束
+db.pragma('foreign_keys = ON')
 
 export function closeDatabase() {
     db.close()

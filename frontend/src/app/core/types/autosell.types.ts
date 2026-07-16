@@ -24,6 +24,10 @@ export interface AutoSellRule {
     apiConfig: ApiConfig | null;
     triggerOn: TriggerOn;
     workflowId: number | null;
+    sharedStockRuleId: number | null;
+    matchPrice: string | null;
+    priceMin: string | null;
+    priceMax: string | null;
     stockCount?: number;
     usedCount?: number;
     createdAt?: string;

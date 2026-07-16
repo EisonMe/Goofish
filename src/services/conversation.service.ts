@@ -3,6 +3,7 @@
  * 处理对话相关的业务逻辑
  */
 
+import { createLogger } from '../core/logger.js'
 import {
     getConversations,
     getConversation,
@@ -13,8 +14,12 @@ import {
     getConversationMessageCount,
     addConversationMessage,
     getConversationCount,
-    getAccount
+    getAccount,
+    getAccountsByIds,
+    getConversationMessageCountsBatch,
 } from '../db/index.js'
+
+const logger = createLogger('Service:Conversation')
 import type {
     ChatMessage,
     Conversation,
@@ -62,7 +67,10 @@ export function addOutgoingMessage(
 ) {
     const timestamp = Date.now()
     const conv = getConversation(accountId, chatId)
-    if (!conv) return
+    if (!conv) {
+        logger.warn(`发送消息失败: 会话不存在 accountId=${accountId} chatId=${chatId}`)
+        return
+    }
 
     const account = getAccount(accountId)
     const senderName = account?.nickname || '我'
@@ -107,8 +115,15 @@ export function getAllConversations(
     const dbConvs = getConversations(limit, offset)
     const total = getConversationCount()
 
+    // 批量查询账号和消息数，避免 N+1
+    const accountIds = [...new Set(dbConvs.map(c => c.account_id))]
+    const accounts = getAccountsByIds(accountIds)
+
+    const pairs = dbConvs.map(c => ({ accountId: c.account_id, chatId: c.chat_id }))
+    const msgCounts = getConversationMessageCountsBatch(pairs)
+
     const conversations = dbConvs.map(c => {
-        const account = getAccount(c.account_id)
+        const account = accounts.get(c.account_id)
         return {
             accountId: c.account_id,
             accountNickname: account?.nickname || c.account_id,
@@ -119,7 +134,7 @@ export function getAllConversations(
             lastMessage: c.last_message,
             lastTime: c.last_time,
             unread: c.unread,
-            messageCount: getConversationMessageCount(c.account_id, c.chat_id)
+            messageCount: msgCounts.get(`${c.account_id}:${c.chat_id}`) ?? 0
         }
     })
 
@@ -136,7 +151,10 @@ export function getConversationDetail(
     beforeId?: number
 ): Conversation | undefined {
     const conv = getConversation(accountId, chatId)
-    if (!conv) return undefined
+    if (!conv) {
+        logger.warn(`发送消息失败: 会话不存在 accountId=${accountId} chatId=${chatId}`)
+        return
+    } undefined
 
     const account = getAccount(accountId)
     const dbMsgs = getConversationMessages(accountId, chatId, messageLimit, beforeId)

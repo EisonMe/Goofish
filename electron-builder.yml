@@ -1,0 +1,62 @@
+appId: com.lrzy8.goofish
+productName: Goofish
+copyright: Copyright (c) Goofish contributors
+
+directories:
+  output: release
+  buildResources: build
+
+files:
+  - dist/**/*
+  - public/**/*
+  - electron-dist/**/*
+  - node_modules/**/*
+  - package.json
+
+asar: true
+asarUnpack:
+  - node_modules/better-sqlite3/**/*
+
+extraResources:
+  - from: build/icon.png
+    to: icon.png
+  - from: build/tray
+    to: tray
+
+npmRebuild: true
+buildDependenciesFromSource: false
+
+win:
+  icon: build/icon.png
+  target:
+    - nsis
+  artifactName: ${productName}-${version}-Windows-${arch}.${ext}
+
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: Goofish
+  deleteAppDataOnUninstall: false
+
+mac:
+  icon: build/icon.png
+  category: public.app-category.business
+  target:
+    - dmg
+    - zip
+  artifactName: ${productName}-${version}-macOS-${arch}.${ext}
+
+linux:
+  icon: build/icon.png
+  category: Office
+  executableName: goofish
+  target:
+    - AppImage
+    - deb
+  artifactName: ${productName}-${version}-Linux-${arch}.${ext}
+
+deb:
+  packageCategory: utils
+  maintainer: lrzy8 <lrzy8@users.noreply.github.com>

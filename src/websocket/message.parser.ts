@@ -1,4 +1,4 @@
-import { decryptMessagePack } from '../utils/msgpack.js'
+import { decodeMessagePack } from '../utils/msgpack.js'
 import { createLogger } from '../core/logger.js'
 import type { ChatMessage } from '../types/index.js'
 
@@ -20,6 +20,7 @@ const ORDER_STATUS_MESSAGES = [
     '[我已拍下，待付款]',
     '[我已付款，等待你发货]',
     '[已付款，待发货]',
+    '[记得及时发货]',
     '[你已发货]',
     '[你已发货，请等待买家确认收货]',
     '[买家确认收货，交易成功]',
@@ -27,6 +28,7 @@ const ORDER_STATUS_MESSAGES = [
     '[你关闭了订单，钱款已原路退返]',
     '[未付款，买家关闭了订单]',
     '[记得及时确认收货]',
+    '记得及时发货',
     '已发货',
     '有蚂蚁森林能量可领'
 ]
@@ -39,10 +41,17 @@ export function isOrderStatusMessage(content: string): boolean {
     return ORDER_STATUS_MESSAGES.some(msg => content.includes(msg))
 }
 
+function extractOrderIdFromUrl(url: unknown): string | undefined {
+    if (typeof url !== "string" || !url) return undefined
+
+    const match = url.match(/(?:orderId|bizOrderId|[?&]id)=(\d{15,})/)
+    return match ? match[1] : undefined
+}
+
 export function decryptSyncData(data: string): any | null {
     // 先尝试 MessagePack 解码（这是主要格式）
     try {
-        const result = decryptMessagePack(data)
+        const result = decodeMessagePack(data)
         if (result && typeof result === 'object') {
             // 检查是否是有效的聊天消息结构
             const msg1 = result['1'] || result[1]
@@ -88,6 +97,18 @@ export function extractChatMessage(message: any, myId: string): ChatMessage | nu
         const senderName = msg10.senderNick || msg10.reminderTitle || '未知用户'
         const senderId = msg10.senderUserId || 'unknown'
         const content = msg10.reminderContent || ''
+        const msg3 = msg1['3'] || msg1[3]
+
+        let itemId: string | undefined = undefined
+        let itemTitle: string | undefined = undefined
+        if (msg3 && typeof msg3 === 'object') {
+            if (msg3.itemId != null) {
+                itemId = String(msg3.itemId)
+            }
+            if (msg3.itemTitle != null) {
+                itemTitle = String(msg3.itemTitle)
+            }
+        }
 
         // 提取 chatId
         const chatIdRaw = msg1['2'] || msg1[2] || ''
@@ -136,6 +157,13 @@ export function extractChatMessage(message: any, myId: string): ChatMessage | nu
             if (urlMatch) {
                 orderId = urlMatch[1]
             }
+
+            if (!itemId) {
+                const itemMatch = msg10.reminderUrl.match(/[?&]itemId=(\d+)/)
+                if (itemMatch) {
+                    itemId = itemMatch[1]
+                }
+            }
         }
 
         // 从消息内容的 dxCard/tip 中提取订单ID（备用方案）
@@ -153,37 +181,24 @@ export function extractChatMessage(message: any, myId: string): ChatMessage | nu
                             if (tipOrderId && /^\d{15,}$/.test(tipOrderId)) {
                                 orderId = tipOrderId
                             }
-                            // 从 main.targetUrl 提取 (fleamarket://order_detail?id=xxx)
+                            // 从各类卡片 URL 提取订单 ID，兼容 IM 卡片、工作台通知和动态卡片
                             if (!orderId) {
-                                const mainTargetUrl = card?.dxCard?.item?.main?.targetUrl
-                                if (mainTargetUrl) {
-                                    const match = mainTargetUrl.match(/[?&]id=(\d{15,})/)
-                                    if (match) orderId = match[1]
-                                }
+                                orderId = extractOrderIdFromUrl(card?.dxCard?.item?.main?.targetUrl)
                             }
-                            // 从 button targetUrl 提取 (orderId=xxx)
                             if (!orderId) {
-                                const btnUrl = card?.dxCard?.item?.main?.exContent?.button?.targetUrl
-                                if (btnUrl) {
-                                    const match = btnUrl.match(/orderId=(\d{15,})|bizOrderId=(\d{15,})/)
-                                    if (match) orderId = match[1] || match[2]
-                                }
+                                orderId = extractOrderIdFromUrl(card?.dxCard?.item?.main?.exContent?.button?.targetUrl)
                             }
-                            // 从 dynamicOperation.changeContent.dxCard 提取（已付款待发货等消息）
                             if (!orderId) {
-                                const changeTargetUrl = card?.dynamicOperation?.changeContent?.dxCard?.item?.main?.targetUrl
-                                if (changeTargetUrl) {
-                                    const match = changeTargetUrl.match(/[?&]id=(\d{15,})/)
-                                    if (match) orderId = match[1]
-                                }
+                                orderId = extractOrderIdFromUrl(card?.dxCard?.item?.main?.exContent?.button?.intent?.page?.pcJumpUrl)
                             }
-                            // 从 dynamicOperation.changeContent.dxCard.button 提取
                             if (!orderId) {
-                                const changeBtnUrl = card?.dynamicOperation?.changeContent?.dxCard?.item?.main?.exContent?.button?.targetUrl
-                                if (changeBtnUrl) {
-                                    const match = changeBtnUrl.match(/[?&]id=(\d{15,})|orderId=(\d{15,})/)
-                                    if (match) orderId = match[1] || match[2]
-                                }
+                                orderId = extractOrderIdFromUrl(card?.dxCard?.item?.main?.exContent?.button?.intent?.page?.jumpUrl)
+                            }
+                            if (!orderId) {
+                                orderId = extractOrderIdFromUrl(card?.dynamicOperation?.changeContent?.dxCard?.item?.main?.targetUrl)
+                            }
+                            if (!orderId) {
+                                orderId = extractOrderIdFromUrl(card?.dynamicOperation?.changeContent?.dxCard?.item?.main?.exContent?.button?.targetUrl)
                             }
                         }
                     }
@@ -229,7 +244,10 @@ export function extractChatMessage(message: any, myId: string): ChatMessage | nu
             msgTime,
             content,
             chatId,
+            itemId,
+            itemTitle,
             msgId,
+            timestamp: createTime || Date.now(),
             raw: message,
             orderId,
             orderStatus,

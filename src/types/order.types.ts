@@ -30,6 +30,14 @@ export interface OrderRecord {
     itemTitle: string | null
     itemPicUrl: string | null
     price: string | null
+    buyAmount: number | null
+    totalAmount: string | null
+    buyerPaidAmount: string | null
+    discountAmount: string | null
+    refundAmount: string | null
+    refundStatus: string | null
+    refundTime: string | null
+    hasRefund: boolean
     buyerUserId: string | null
     buyerNickname: string | null
     chatId: string | null
@@ -39,6 +47,8 @@ export interface OrderRecord {
     payTime: string | null
     shipTime: string | null
     completeTime: string | null
+    deliveredQuantity?: number
+    remainingQuantity?: number
     createdAt: string
     updatedAt: string
 }
@@ -78,7 +88,12 @@ export interface OrderButton {
 // 订单列表查询参数
 export interface OrderListParams {
     accountId?: string
+    groupId?: number
     status?: number
+    keyword?: string
+    hasRefund?: boolean
+    pendingRedelivery?: boolean
+    orderTimeStart?: string
     limit?: number
     offset?: number
 }

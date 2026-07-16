@@ -72,9 +72,13 @@ export function createAutoSellRoutes() {
         if (isNaN(id)) {
             return c.json({ error: '无效的规则ID' }, 400)
         }
-        const body = await c.req.json()
-        const success = updateAutoSellRule(id, body)
-        return c.json({ success })
+        try {
+            const body = await c.req.json()
+            const success = updateAutoSellRule(id, body)
+            return c.json({ success })
+        } catch (error: any) {
+            return c.json({ error: error.message || '更新规则失败' }, 400)
+        }
     })
 
     // 删除规则
@@ -83,8 +87,12 @@ export function createAutoSellRoutes() {
         if (isNaN(id)) {
             return c.json({ error: '无效的规则ID' }, 400)
         }
-        const success = deleteAutoSellRule(id)
-        return c.json({ success })
+        try {
+            const success = deleteAutoSellRule(id)
+            return c.json({ success })
+        } catch (error: any) {
+            return c.json({ error: error.message || '删除规则失败' }, 400)
+        }
     })
 
     // 切换规则状态

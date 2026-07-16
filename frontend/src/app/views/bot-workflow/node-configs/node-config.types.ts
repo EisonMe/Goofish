@@ -28,6 +28,7 @@ export interface MindMapNode {
         uid?: string;
         nodeType?: string;
         config?: Record<string, any>;
+        edgeFromOutput?: string;
         fillColor?: string;
         borderColor?: string;
         fontColor?: string;
@@ -68,8 +69,8 @@ export const TIME_UNITS = [
 export const CONDITION_TEMPLATES = [
     { label: '商品价格', expr: 'order.price', ops: ['>', '<', '>=', '<=', '=='] },
     { label: '商品数量', expr: 'order.quantity', ops: ['>', '<', '>=', '<=', '=='] },
-    { label: '商品名称包含', expr: 'order.goodsName.includes("")', ops: [] },
-    { label: '买家留言包含', expr: 'order.buyerMessage.includes("")', ops: [] },
+    { label: '商品名称包含', expr: '(order.goodsName || "").includes("")', ops: [] },
+    { label: '买家昵称包含', expr: '(order.buyerNick || "").includes("")', ops: [] },
     { label: '商品ID', expr: 'order.goodsId', ops: ['==', '!='] },
-    { label: '买家昵称', expr: 'order.buyerNick', ops: ['==', '!=', 'includes'] }
+    { label: '买家ID', expr: 'order.buyerUserId', ops: ['==', '!='] }
 ];

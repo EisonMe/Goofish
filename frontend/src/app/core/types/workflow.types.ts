@@ -9,6 +9,7 @@ export type WorkflowNodeType =
     | 'ship'
     | 'delay'
     | 'condition'
+    | 'notify'
 
 export interface WorkflowNode {
     id: string
@@ -60,5 +61,6 @@ export const WORKFLOW_NODE_TYPES: Record<WorkflowNodeType, {
     delivery: { label: '发货', color: '#f59e0b', inputs: 1, outputs: 1 },
     ship: { label: '标记发货', color: '#8b5cf6', inputs: 1, outputs: 0 },
     delay: { label: '延迟', color: '#6b7280', inputs: 1, outputs: 1 },
-    condition: { label: '条件', color: '#ec4899', inputs: 1, outputs: 2 }
+    condition: { label: '\u6761\u4ef6', color: '#ec4899', inputs: 1, outputs: 2 },
+    notify: { label: '\u901a\u77e5', color: '#06b6d4', inputs: 1, outputs: 1 }
 }

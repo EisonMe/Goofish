@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, writeFileSync, readdirSync, unlinkSync, statSync
 import { join } from 'path'
 
 import { createLogger } from '../../core/logger.js'
-import { decryptMessagePack } from '../../utils/msgpack.js'
+import { decodeMessagePack } from '../../utils/msgpack.js'
 
 const logger = createLogger('Api:DevMsg')
 
@@ -21,6 +21,7 @@ interface RawMessage {
 }
 
 const messageBuffer: RawMessage[] = []
+let totalMessageCount = 0
 const MAX_BUFFER_SIZE = 500
 
 // 解码消息数据
@@ -45,7 +46,7 @@ function decodeMessageData(msgData: any): any[] | null {
             if (!data) continue
 
             try {
-                const result = decryptMessagePack(data)
+                const result = decodeMessagePack(data)
                 if (result) {
                     decoded.push(result)
                 }
@@ -111,6 +112,7 @@ export function addRawMessage(accountId: string, data: any) {
         decoded
     }
     messageBuffer.unshift(msg)
+    totalMessageCount++
 
     if (messageBuffer.length > MAX_BUFFER_SIZE) {
         messageBuffer.pop()
@@ -157,7 +159,8 @@ export function cleanOldRawMessages() {
 
 // 启动时清理一次，之后每小时清理
 cleanOldRawMessages()
-setInterval(cleanOldRawMessages, 60 * 60 * 1000)
+const rawMessageCleanupTimer = setInterval(cleanOldRawMessages, 60 * 60 * 1000)
+rawMessageCleanupTimer.unref()
 
 export function createDevMessageRoutes() {
     const router = new Hono()
@@ -165,7 +168,7 @@ export function createDevMessageRoutes() {
     // 获取所有原始消息
     router.get('/', (c) => {
         const accountId = c.req.query('accountId')
-        const limit = parseInt(c.req.query('limit') || '100')
+        const limit = Math.max(1, Math.min(1000, parseInt(c.req.query('limit') || '100') || 100))
 
         let messages = messageBuffer
 
@@ -182,7 +185,7 @@ export function createDevMessageRoutes() {
     // 获取指定账号的原始消息
     router.get('/:accountId', (c) => {
         const accountId = c.req.param('accountId')
-        const limit = parseInt(c.req.query('limit') || '100')
+        const limit = Math.max(1, Math.min(1000, parseInt(c.req.query('limit') || '100') || 100))
 
         const messages = messageBuffer.filter(m => m.accountId === accountId)
 
@@ -217,10 +220,11 @@ export function createDevMessageRoutes() {
                 controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'connected', accountId: accountId || 'all' })}\n\n`))
 
                 const interval = setInterval(() => {
-                    const currentLength = messageBuffer.length
+                    const currentCount = totalMessageCount
 
-                    if (currentLength > lastIndex) {
-                        const newMessages = messageBuffer.slice(0, currentLength - lastIndex)
+                    if (currentCount > lastIndex) {
+                        const newMsgCount = Math.min(currentCount - lastIndex, messageBuffer.length)
+                        const newMessages = messageBuffer.slice(0, newMsgCount)
 
                         for (const msg of newMessages.reverse()) {
                             if (!accountId || msg.accountId === accountId) {
@@ -228,12 +232,14 @@ export function createDevMessageRoutes() {
                             }
                         }
 
-                        lastIndex = currentLength
+                        lastIndex = currentCount
                     }
                 }, 500)
 
                 setTimeout(() => {
                     clearInterval(interval)
+                    // 发送 retry 指令，告知客户端 3 秒后重连
+                    controller.enqueue(encoder.encode('retry: 3000\n\n'))
                     controller.close()
                 }, 30000)
             }

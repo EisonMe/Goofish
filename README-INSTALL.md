@@ -1,10 +1,20 @@
 # GoofishCBot 安装说明索引
 
-本项目提供了三种详细的安装部署方式，请根据你的环境选择对应的安装说明：
+本项目提供桌面应用和三种服务器部署方式，请根据你的环境选择：
 
 ## 📚 安装文档
 
-### 1. [面板部署安装说明](./docs/安装说明-面板部署.md)
+### 1. 桌面应用（Windows、macOS、Linux）
+
+无需单独安装 Node.js。进入 [Desktop builds](https://github.com/lrzy8/Goofish/actions/workflows/desktop-build.yml) 的最新成功任务，在 Artifacts 中下载对应安装包：
+
+- Windows x64：NSIS `.exe`
+- macOS Intel / Apple Silicon：`.dmg` 或 `.zip`
+- Linux x64：`.AppImage` 或 `.deb`
+
+桌面应用关闭窗口后会继续在系统托盘运行，可从托盘重新显示窗口、在浏览器打开、打开数据目录或退出。
+
+### 2. [面板部署安装说明](./docs/安装说明-面板部署.md)
 适用于：宝塔面板、1Panel、雨云面板等 Linux 服务器面板
 
 **特点：**
@@ -13,7 +23,7 @@
 - 支持 PM2 进程管理
 - 支持反向代理配置
 
-### 2. [Docker 部署安装说明](./docs/安装说明-Docker部署.md)
+### 3. [Docker 部署安装说明](./docs/安装说明-Docker部署.md)
 适用于：任何支持 Docker 的系统（Linux、Windows、macOS）
 
 **特点：**
@@ -22,7 +32,7 @@
 - 易于维护和更新
 - 支持 Docker Compose
 
-### 3. [飞牛 NAS 部署安装说明](./docs/安装说明-飞牛NAS部署.md)
+### 4. [飞牛 NAS 部署安装说明](./docs/安装说明-飞牛NAS部署.md)
 适用于：飞牛 NAS（FnOS）系统
 
 **特点：**
@@ -45,8 +55,8 @@
 
 ```bash
 # 1. 克隆项目
-git clone https://github.com/haiyewei/GoofishCredentialsBot.git
-cd GoofishCredentialsBot
+git clone https://github.com/lrzy8/Goofish.git
+cd Goofish
 
 # 2. 安装依赖
 npm install

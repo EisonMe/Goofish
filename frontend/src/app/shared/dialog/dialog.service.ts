@@ -28,6 +28,10 @@ export class DialogService {
         return this.open({ title, message, type: 'alert', confirmText });
     }
 
+    alertHtml(title: string, message: string, confirmText = '确定'): Promise<boolean> {
+        return this.open({ title, message, type: 'alert', confirmText, html: true });
+    }
+
     private open(config: DialogConfig): Promise<boolean> {
         this.config.set(config);
         this.visible.set(true);

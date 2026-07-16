@@ -12,6 +12,16 @@ export interface Account {
     remark?: string;
     createdAt?: string;
     updatedAt?: string;
+    status?: AccountStatus | null;
+}
+
+export interface AccountStatus {
+    accountId: string;
+    connected: boolean;
+    lastHeartbeat?: string;
+    lastTokenRefresh?: string;
+    lastSyncTimestamp?: number;
+    errorMessage?: string;
 }
 
 export interface ClientStatus {

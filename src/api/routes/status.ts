@@ -27,15 +27,15 @@ export function createStatusRoutes(getClientManager: () => ClientManager | null)
     // 获取系统时间信息
     router.get('/time', (c) => {
         const now = new Date()
-        const offset = 8 * 60 // 中国时区偏移（GMT+8）
-        const localTime = new Date(now.getTime() + now.getTimezoneOffset() * 60000 + offset * 60000)
-        
+        const timezoneSetting = getSetting('system_timezone') || 'Asia/Shanghai'
+
         return c.json({
             utc_time: now.toISOString(),
-            local_time: localTime.toISOString(),
-            local_formatted: localTime.toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' }),
+            local_time: now.toLocaleString('zh-CN', { timeZone: timezoneSetting }),
+            local_formatted: now.toLocaleString('zh-CN', { timeZone: timezoneSetting, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }),
+            timezone: timezoneSetting,
             timezone_offset: '+8:00',
-            timestamp: localTime.getTime()
+            timestamp: now.getTime()
         })
     })
     

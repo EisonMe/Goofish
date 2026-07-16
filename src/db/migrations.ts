@@ -58,11 +58,14 @@ function createAccountTables() {
       connected INTEGER DEFAULT 0,
       last_heartbeat TEXT,
       last_token_refresh TEXT,
+      last_sync_timestamp INTEGER,
       error_message TEXT,
       updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE CASCADE
     )
   `)
+
+  safeAddColumn('account_status', 'last_sync_timestamp', 'INTEGER')
 }
 
 // 创建消息相关表
@@ -143,6 +146,7 @@ function createAutoReplyTables() {
       match_pattern TEXT NOT NULL,
       reply_content TEXT NOT NULL,
       account_id TEXT,
+      item_group_id INTEGER,
       exclude_match INTEGER DEFAULT 0,
       created_at TEXT DEFAULT CURRENT_TIMESTAMP,
       updated_at TEXT DEFAULT CURRENT_TIMESTAMP
@@ -151,6 +155,10 @@ function createAutoReplyTables() {
 
   // 添加 exclude_match 列（如果不存在）
   safeAddColumn('autoreply_rules', 'exclude_match', 'INTEGER DEFAULT 0')
+  safeAddColumn('autoreply_rules', 'item_group_id', 'INTEGER')
+
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_autoreply_rules_priority
+    ON autoreply_rules(priority DESC, item_group_id, id ASC)`)
 
   // 插入默认测试规则
   const testRule = db.prepare(
@@ -192,6 +200,14 @@ function createOrderTables() {
       item_title TEXT,
       item_pic_url TEXT,
       price TEXT,
+      buy_amount INTEGER DEFAULT 1,
+      total_amount TEXT,
+      buyer_paid_amount TEXT,
+      discount_amount TEXT,
+      refund_amount TEXT,
+      refund_status TEXT,
+      refund_time TEXT,
+      has_refund INTEGER DEFAULT 0,
       buyer_user_id TEXT,
       buyer_nickname TEXT,
       chat_id TEXT,
@@ -207,8 +223,16 @@ function createOrderTables() {
     )
   `)
 
-  // 添加 chat_id 列（如果不存在）
+  // 添加订单扩展字段（如果不存在）
   safeAddColumn('orders', 'chat_id', 'TEXT')
+  safeAddColumn('orders', 'buy_amount', 'INTEGER DEFAULT 1')
+  safeAddColumn('orders', 'total_amount', 'TEXT')
+  safeAddColumn('orders', 'buyer_paid_amount', 'TEXT')
+  safeAddColumn('orders', 'discount_amount', 'TEXT')
+  safeAddColumn('orders', 'refund_amount', 'TEXT')
+  safeAddColumn('orders', 'refund_status', 'TEXT')
+  safeAddColumn('orders', 'refund_time', 'TEXT')
+  safeAddColumn('orders', 'has_refund', 'INTEGER DEFAULT 0')
 
   // 创建索引
   db.exec(`CREATE INDEX IF NOT EXISTS idx_orders_account 
@@ -244,12 +268,17 @@ function createAutoSellTables() {
       api_config TEXT,
       trigger_on TEXT DEFAULT 'paid',
       workflow_id INTEGER,
+      shared_stock_rule_id INTEGER,
       created_at TEXT DEFAULT CURRENT_TIMESTAMP,
       updated_at TEXT DEFAULT CURRENT_TIMESTAMP
     )
   `)
 
   safeAddColumn('autosell_rules', 'workflow_id', 'INTEGER')
+  safeAddColumn('autosell_rules', 'shared_stock_rule_id', 'INTEGER')
+  safeAddColumn('autosell_rules', 'match_price', 'TEXT')
+  safeAddColumn('autosell_rules', 'price_min', 'TEXT')
+  safeAddColumn('autosell_rules', 'price_max', 'TEXT')
 
   db.exec(`
     CREATE TABLE IF NOT EXISTS autosell_stock (
@@ -272,9 +301,27 @@ function createAutoSellTables() {
       account_id TEXT NOT NULL,
       delivery_type TEXT NOT NULL,
       content TEXT NOT NULL,
+      quantity INTEGER DEFAULT 1,
       status TEXT DEFAULT 'success',
       error_message TEXT,
       created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    )
+  `)
+
+  safeAddColumn('autosell_logs', 'quantity', 'INTEGER DEFAULT 1')
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS autosell_log_items (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      delivery_log_id INTEGER NOT NULL,
+      order_id TEXT NOT NULL,
+      account_id TEXT NOT NULL,
+      rule_id INTEGER,
+      delivery_type TEXT NOT NULL,
+      item_index INTEGER DEFAULT 1,
+      content TEXT NOT NULL,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (delivery_log_id) REFERENCES autosell_logs(id) ON DELETE CASCADE
     )
   `)
 
@@ -283,6 +330,35 @@ function createAutoSellTables() {
     ON autosell_stock(rule_id, used)`)
   db.exec(`CREATE INDEX IF NOT EXISTS idx_autosell_logs_order 
     ON autosell_logs(order_id)`)
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_autosell_log_items_order
+    ON autosell_log_items(order_id, delivery_log_id)`)
+}
+
+// 创建 AI 回复追踪表
+function createAiTraceTables() {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS ai_reply_logs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      account_id TEXT NOT NULL,
+      chat_id TEXT,
+      buyer_user_id TEXT,
+      buyer_name TEXT,
+      rule_name TEXT,
+      input_message TEXT NOT NULL,
+      reply_content TEXT,
+      model TEXT,
+      global_prompt TEXT,
+      rule_prompt TEXT,
+      final_system_prompt TEXT,
+      tool_calls TEXT,
+      tool_results TEXT,
+      error_message TEXT,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    )
+  `)
+
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_ai_reply_logs_account_chat
+    ON ai_reply_logs(account_id, chat_id, created_at DESC)`)
 }
 
 // 创建发货流程表
@@ -349,6 +425,33 @@ function createWorkflowTables() {
   }
 }
 
+
+// 创建商品分组表
+function createItemGroupTables() {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS item_groups (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      description TEXT,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+    )
+  `)
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS item_group_items (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      group_id INTEGER NOT NULL,
+      item_id TEXT NOT NULL,
+      item_title TEXT,
+      account_id TEXT,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (group_id) REFERENCES item_groups(id) ON DELETE CASCADE,
+      UNIQUE(group_id, item_id, account_id)
+    )
+  `)
+}
+
 export function runMigrations() {
   logger.info('开始数据库迁移...')
 
@@ -360,7 +463,9 @@ export function runMigrations() {
   createOrderTables()
   createSettingsTables()
   createAutoSellTables()
+  createAiTraceTables()
   createWorkflowTables()
+  createItemGroupTables()
 
   logger.info('数据库迁移完成')
 }

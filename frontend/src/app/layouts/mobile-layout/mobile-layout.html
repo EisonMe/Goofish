@@ -66,6 +66,20 @@
                 </a>
             </li>
             <li>
+                <a routerLink="/reports" routerLinkActive="active text-primary bg-primary/10" class="menu-item"
+                    (click)="setView('reports')">
+                    <lucide-icon [img]="icons.BarChart3" class="w-5 h-5"></lucide-icon>
+                    <span>数据报表</span>
+                </a>
+            </li>
+            <li>
+                <a routerLink="/item-groups" routerLinkActive="active text-primary bg-primary/10" class="menu-item"
+                    (click)="setView('item-groups')">
+                    <lucide-icon [img]="icons.Box" class="w-5 h-5"></lucide-icon>
+                    <span>商品分组</span>
+                </a>
+            </li>
+            <li>
                 <a routerLink="/conversations" routerLinkActive="active text-primary bg-primary/10" class="menu-item"
                     (click)="setView('conversations')">
                     <lucide-icon [img]="icons.MessageCircle" class="w-5 h-5"></lucide-icon>
@@ -113,6 +127,13 @@
                     (click)="setView('setting')">
                     <lucide-icon [img]="icons.Settings" class="w-5 h-5"></lucide-icon>
                     <span>系统设置</span>
+                </a>
+            </li>
+            <li>
+                <a routerLink="/time-setting" routerLinkActive="active text-primary bg-primary/10" class="menu-item"
+                    (click)="setView('time-setting')">
+                    <lucide-icon [img]="icons.Clock" class="w-5 h-5"></lucide-icon>
+                    <span>时间设置</span>
                 </a>
             </li>
         </ul>

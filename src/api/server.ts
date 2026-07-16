@@ -19,16 +19,19 @@ import {
     createAutoReplyRoutes,
     createOrderRoutes,
     createAutoSellRoutes,
-    createWorkflowRoutes
+    createWorkflowRoutes,
+    createReportRoutes,
+    createItemGroupRoutes
 } from './routes/index.js'
 import { createDevMessageRoutes } from './routes/dev-messages.route.js'
-import { createWSPushHandler } from './routes/ws-push.route.js'
+import { closeWSClients, createWSPushHandler } from './routes/ws-push.route.js'
 import type { ClientManager } from '../websocket/client.manager.js'
 
 const logger = createLogger('Api:Server')
 const apiLogger = createLogger('Api:Request')
 
 let clientManager: ClientManager | null = null
+let activeServer: ReturnType<typeof serve> | null = null
 
 export function setClientManager(cm: ClientManager) {
     clientManager = cm
@@ -70,6 +73,7 @@ export function createApp() {
     const statusRoutes = createStatusRoutes(getClientManager)
     app.route('/', statusRoutes)
     app.route('/api', statusRoutes)
+    app.route('/api/status', statusRoutes)
 
     app.route('/api/accounts', createAccountRoutes(getClientManager))
     app.route('/api/goods', createGoodsRoutes(getClientManager))
@@ -80,6 +84,8 @@ export function createApp() {
     app.route('/api/orders', createOrderRoutes(getClientManager))
     app.route('/api/autosell', createAutoSellRoutes())
     app.route('/api/workflows', createWorkflowRoutes())
+    app.route('/api/reports', createReportRoutes())
+    app.route('/api/item-groups', createItemGroupRoutes())
 
     // 开发环境才注册调试路由
     if (ENV.IS_DEV) {
@@ -141,17 +147,82 @@ function setupStaticFiles(app: Hono) {
     }
 }
 
-export function startServer(port = SERVER_CONFIG.PORT) {
+export function startServer(port = SERVER_CONFIG.PORT): Promise<void> {
+    if (activeServer) {
+        return Promise.reject(new Error('API server is already running'))
+    }
+
     const app = createApp()
 
-    const server = serve({ fetch: app.fetch, port, hostname: SERVER_CONFIG.HOST }, () => {
-        logger.info(`服务器启动在端口 ${port}`)
-        logger.info(`访问 http://localhost:${port} 打开管理面板`)
-    })
+    return new Promise((resolve, reject) => {
+        let settled = false
 
-    // 注入 WebSocket 支持
-    if (injectWebSocket) {
-        injectWebSocket(server)
-        logger.info('WebSocket 推送已启用')
+        const server = serve({ fetch: app.fetch, port, hostname: SERVER_CONFIG.HOST }, () => {
+            logger.info(`服务器启动在端口 ${port}`)
+            logger.info(`访问 http://localhost:${port} 打开管理面板`)
+            settled = true
+            resolve()
+        })
+        activeServer = server
+
+        server.once('error', (error) => {
+            logger.error(`服务器启动失败: ${error}`)
+            if (!settled) {
+                activeServer = null
+                settled = true
+                reject(error)
+            }
+        })
+
+        server.once('close', () => {
+            if (activeServer === server) {
+                activeServer = null
+            }
+        })
+
+        // 注入 WebSocket 支持
+        if (injectWebSocket) {
+            injectWebSocket(server)
+            logger.info('WebSocket 推送已启用')
+        }
+    })
+}
+
+export function stopServer(): Promise<void> {
+    const server = activeServer
+    if (!server) {
+        return Promise.resolve()
     }
+
+    activeServer = null
+    closeWSClients()
+
+    return new Promise((resolve, reject) => {
+        let settled = false
+        const finish = (error?: Error) => {
+            if (settled) return
+            settled = true
+            clearTimeout(forceCloseTimer)
+            if (error) reject(error)
+            else resolve()
+        }
+
+        const forceCloseTimer = setTimeout(() => {
+            const closeAllConnections = (server as typeof server & {
+                closeAllConnections?: () => void
+            }).closeAllConnections
+            closeAllConnections?.call(server)
+            finish()
+        }, 2000)
+        forceCloseTimer.unref()
+
+        server.close((error) => {
+            if (error) {
+                logger.warn(`服务器关闭时发生错误: ${error}`)
+            } else {
+                logger.info('API 服务器已关闭')
+            }
+            finish(error)
+        })
+    })
 }

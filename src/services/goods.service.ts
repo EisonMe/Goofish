@@ -44,7 +44,7 @@ export async function fetchGoodsList(
             api: 'mtop.idle.web.xyh.item.list'
         })
 
-        const res = await fetch(`${API_ENDPOINTS.ITEM_LIST}?${params}`, {
+        const res = await fetch(`${API_ENDPOINTS.ITEM_LIST}?${params}`, { signal: AbortSignal.timeout(30000),
             method: 'POST',
             headers: {
                 'accept': 'application/json',
@@ -99,5 +99,46 @@ export async function fetchGoodsList(
     } catch (e) {
         logger.error(`[${accountId}] 获取商品列表异常: ${e}`)
         return { items: [], nextPage: false, totalCount: 0 }
+    }
+}
+
+export async function fetchAllGoodsForAccount(
+    accountId: string,
+    userId: string
+): Promise<{ items: GoodsItem[]; totalCount: number; fetchFailed: boolean }> {
+    const merged = new Map<string, GoodsItem>()
+    let page = 1
+    let totalCount = 0
+
+    while (true) {
+        // Some accounts reject oversized page sizes. Keep pagination aligned
+        // with the stable single-account goods view to avoid empty autosell lists.
+        const result = await fetchGoodsList(accountId, userId, page, 20)
+
+        if (page === 1) {
+            totalCount = result.totalCount || 0
+        }
+
+        if (page === 1 && result.items.length === 0 && totalCount === 0) {
+            return { items: [], totalCount: 0, fetchFailed: true }
+        }
+
+        for (const item of result.items) {
+            if (item.id) {
+                merged.set(item.id, item)
+            }
+        }
+
+        if (!result.nextPage || result.items.length === 0) {
+            break
+        }
+
+        page += 1
+    }
+
+    return {
+        items: Array.from(merged.values()),
+        totalCount: totalCount || merged.size,
+        fetchFailed: false
     }
 }

@@ -1,16 +1,24 @@
+import path from 'path'
+import { pathToFileURL } from 'url'
+
 import { createLogger, cleanOldLogs, setLogLevel, LogLevel } from './core/logger.js'
 import { ClientManager } from './websocket/index.js'
 import { initDatabase, closeDatabase } from './db/index.js'
-import { startServer, setClientManager, messageStore, conversationStore } from './api/index.js'
+import { startServer, stopServer, setClientManager, messageStore, conversationStore } from './api/index.js'
 import { fetchUserHead, handleOrderMessage, fetchAndUpdateOrderDetail } from './services/index.js'
 import { SERVER_CONFIG, LOG_CONFIG } from './core/constants.js'
 
 const logger = createLogger('App')
 
-// 保存 clientManager 引用供异步函数使用
-let clientManager: ClientManager
+let clientManager: ClientManager | null = null
+let databaseInitialized = false
+let started = false
+let shutdownPromise: Promise<void> | null = null
 
-async function main() {
+export async function main() {
+    if (started) return
+    started = true
+
     // 设置日志级别
     setLogLevel(LOG_CONFIG.LEVEL as LogLevel)
 
@@ -21,6 +29,7 @@ async function main() {
 
     // 初始化数据库
     initDatabase()
+    databaseInitialized = true
 
     // 创建客户端管理器
     clientManager = new ClientManager(async (accountId, msg) => {
@@ -28,11 +37,9 @@ async function main() {
         messageStore.add(msg)
         conversationStore.addIncoming(accountId, msg)
 
-        // 处理订单状态消息
-        if (msg.isOrderMessage && msg.orderId) {
-            logger.info(`订单消息: orderId=${msg.orderId}`)
+        if (msg.orderId) {
+            logger.info(`订单线索消息: orderId=${msg.orderId}${msg.isOrderMessage ? '（订单状态消息）' : '（普通消息提取）'}`)
             handleOrderMessage(accountId, msg.orderId, msg.chatId)
-            // 异步获取订单详情
             fetchOrderDetailAsync(accountId, msg.orderId)
         }
 
@@ -44,33 +51,37 @@ async function main() {
     setClientManager(clientManager)
 
     // 启动 API 服务器
-    startServer(SERVER_CONFIG.PORT)
+    await startServer(SERVER_CONFIG.PORT)
 
     // 从数据库加载并启动所有启用的账号
     await clientManager.startAll()
 
-    // 优雅退出
-    process.on('SIGINT', () => {
-        logger.info('收到退出信号，正在断开连接...')
-        clientManager.stopAll()
-        closeDatabase()
-        process.exit(0)
-    })
-
-    process.on('SIGTERM', () => {
-        logger.info('收到终止信号，正在断开连接...')
-        clientManager.stopAll()
-        closeDatabase()
-        process.exit(0)
-    })
-
     logger.info('系统已启动，等待消息...')
 }
 
-main().catch((e) => {
-    logger.error(`程序异常: ${e}`)
-    process.exit(1)
-})
+export function shutdown(): Promise<void> {
+    if (shutdownPromise) return shutdownPromise
+
+    shutdownPromise = (async () => {
+        logger.info('正在关闭应用服务...')
+        clientManager?.stopAll()
+        clientManager = null
+
+        await stopServer()
+
+        if (databaseInitialized) {
+            closeDatabase()
+            databaseInitialized = false
+        }
+
+        started = false
+        logger.info('应用服务已关闭')
+    })().finally(() => {
+        shutdownPromise = null
+    })
+
+    return shutdownPromise
+}
 
 // 异步获取用户头像
 async function fetchUserAvatarAsync(accountId: string, chatId: string, userId: string) {
@@ -88,7 +99,7 @@ async function fetchUserAvatarAsync(accountId: string, chatId: string, userId: s
 // 异步获取订单详情
 async function fetchOrderDetailAsync(accountId: string, orderId: string) {
     try {
-        const client = clientManager.getClient(accountId)
+        const client = clientManager?.getClient(accountId)
         if (!client) {
             logger.warn(`获取订单详情失败: 账号 ${accountId} 客户端不存在`)
             return
@@ -97,4 +108,28 @@ async function fetchOrderDetailAsync(accountId: string, orderId: string) {
     } catch (e) {
         logger.debug(`获取订单详情失败: ${e}`)
     }
+}
+
+const entryPath = process.argv[1] ? pathToFileURL(path.resolve(process.argv[1])).href : ''
+const isDirectRun = entryPath === import.meta.url
+
+if (isDirectRun) {
+    const handleSignal = async (signal: string) => {
+        logger.info(`收到 ${signal} 信号，正在断开连接...`)
+        try {
+            await shutdown()
+            process.exit(0)
+        } catch (error) {
+            logger.error(`关闭服务失败: ${error}`)
+            process.exit(1)
+        }
+    }
+
+    process.once('SIGINT', () => void handleSignal('SIGINT'))
+    process.once('SIGTERM', () => void handleSignal('SIGTERM'))
+
+    main().catch((e) => {
+        logger.error(`程序异常: ${e}`)
+        void shutdown().finally(() => process.exit(1))
+    })
 }

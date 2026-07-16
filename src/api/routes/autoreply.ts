@@ -46,17 +46,22 @@ export function createAutoReplyRoutes() {
 
     // 保存 AI 设置
     router.put('/ai', async (c) => {
-        const body = await c.req.json()
-        const { baseUrl, apiKey, model, systemPrompt } = body
+        try {
+            const body = await c.req.json()
+            const { baseUrl, apiKey, model, systemPrompt } = body
 
-        const updates: any = {}
-        if (baseUrl !== undefined) updates.baseUrl = baseUrl
-        if (apiKey !== undefined && apiKey !== '******') updates.apiKey = apiKey
-        if (model !== undefined) updates.model = model
-        if (systemPrompt !== undefined) updates.systemPrompt = systemPrompt
+            const updates: any = {}
+            if (baseUrl !== undefined) updates.baseUrl = baseUrl
+            if (apiKey !== undefined && apiKey !== '******') updates.apiKey = apiKey
+            if (model !== undefined) updates.model = model
+            if (systemPrompt !== undefined) updates.systemPrompt = systemPrompt
 
-        saveAISettings(updates)
-        return c.json({ success: true })
+            saveAISettings(updates)
+            return c.json({ success: true })
+        } catch (e) {
+            console.error('保存 AI 设置失败:', e)
+            return c.json({ success: false, error: '保存 AI 设置失败' }, 500)
+        }
     })
 
     // 测试 AI 连接
@@ -85,6 +90,8 @@ export function createAutoReplyRoutes() {
                 matchPattern: r.match_pattern,
                 replyContent: r.reply_content,
                 accountId: r.account_id,
+                itemGroupId: r.item_group_id,
+                itemGroupName: r.item_group_name || null,
                 excludeMatch: r.exclude_match === 1,
                 createdAt: r.created_at,
                 updatedAt: r.updated_at
@@ -111,6 +118,8 @@ export function createAutoReplyRoutes() {
             matchPattern: rule.match_pattern,
             replyContent: rule.reply_content,
             accountId: rule.account_id,
+            itemGroupId: rule.item_group_id,
+            itemGroupName: rule.item_group_name || null,
             excludeMatch: rule.exclude_match === 1,
             createdAt: rule.created_at,
             updatedAt: rule.updated_at
@@ -120,7 +129,7 @@ export function createAutoReplyRoutes() {
     // 创建规则
     router.post('/', async (c) => {
         const body = await c.req.json()
-        const { name, enabled, priority, matchType, matchPattern, replyContent, accountId, excludeMatch } = body
+        const { name, enabled, priority, matchType, matchPattern, replyContent, accountId, itemGroupId, excludeMatch } = body
 
         if (!name || !matchType) {
             return c.json({ error: 'Missing required fields' }, 400)
@@ -135,12 +144,8 @@ export function createAutoReplyRoutes() {
             return c.json({ error: 'Invalid matchType' }, 400)
         }
 
-        // AI 规则：如果提示词为空，填入全局提示词
-        let finalReplyContent = replyContent || ''
-        if (matchType === 'ai' && !finalReplyContent) {
-            const aiSettings = getAISettings()
-            finalReplyContent = aiSettings.systemPrompt || ''
-        }
+        // AI 规则的 replyContent 仅作为附加规则，不再复制全局提示词，避免后续全局提示词更新失效
+        const finalReplyContent = replyContent || ''
 
         const id = createAutoReplyRule({
             name,
@@ -150,6 +155,7 @@ export function createAutoReplyRoutes() {
             matchPattern: matchPattern || '',
             replyContent: finalReplyContent,
             accountId: accountId || null,
+            itemGroupId: itemGroupId ?? null,
             excludeMatch: excludeMatch || false
         })
 
@@ -168,11 +174,7 @@ export function createAutoReplyRoutes() {
             return c.json({ error: 'Invalid matchType' }, 400)
         }
 
-        // AI 规则：如果提示词为空，填入全局提示词
-        if (body.matchType === 'ai' && !body.replyContent) {
-            const aiSettings = getAISettings()
-            body.replyContent = aiSettings.systemPrompt || ''
-        }
+        // AI 规则的 replyContent 仅作为附加规则，不再自动复制全局提示词
 
         const success = updateAutoReplyRule(id, body)
         if (!success) {

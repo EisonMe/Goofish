@@ -30,6 +30,10 @@ export interface AutoSellRule {
     apiConfig: ApiConfig | null
     triggerOn: TriggerOn
     workflowId: number | null
+    sharedStockRuleId: number | null
+    matchPrice: string | null
+    priceMin: string | null
+    priceMax: string | null
     stockCount?: number      // 库存数量（仅stock类型）
     usedCount?: number       // 已用数量
     createdAt?: string
@@ -47,6 +51,11 @@ export interface DbAutoSellRule {
     delivery_content: string | null
     api_config: string | null
     trigger_on: TriggerOn
+    workflow_id: number | null
+    shared_stock_rule_id: number | null
+    match_price: string | null
+    price_min: string | null
+    price_max: string | null
     created_at: string
     updated_at: string
 }
@@ -81,8 +90,21 @@ export interface DeliveryLog {
     accountId: string
     deliveryType: DeliveryType
     content: string
+    quantity: number
     status: 'success' | 'failed'
     errorMessage: string | null
+    createdAt: string
+}
+
+export interface DeliveryLogItem {
+    id: number
+    deliveryLogId: number
+    orderId: string
+    accountId: string
+    ruleId: number | null
+    deliveryType: DeliveryType
+    itemIndex: number
+    content: string
     createdAt: string
 }
 
@@ -94,8 +116,21 @@ export interface DbDeliveryLog {
     account_id: string
     delivery_type: DeliveryType
     content: string
+    quantity: number | null
     status: string
     error_message: string | null
+    created_at: string
+}
+
+export interface DbDeliveryLogItem {
+    id: number
+    delivery_log_id: number
+    order_id: string
+    account_id: string
+    rule_id: number | null
+    delivery_type: DeliveryType
+    item_index: number
+    content: string
     created_at: string
 }
 
@@ -110,6 +145,10 @@ export interface CreateAutoSellRuleParams {
     apiConfig?: ApiConfig | null
     triggerOn?: TriggerOn
     workflowId?: number | null
+    sharedStockRuleId?: number | null
+    matchPrice?: string | null
+    priceMin?: string | null
+    priceMax?: string | null
 }
 
 // 更新规则参数
@@ -123,11 +162,19 @@ export interface UpdateAutoSellRuleParams {
     apiConfig?: ApiConfig | null
     triggerOn?: TriggerOn
     workflowId?: number | null
+    sharedStockRuleId?: number | null
+    matchPrice?: string | null
+    priceMin?: string | null
+    priceMax?: string | null
 }
 
 // 发货结果
 export interface DeliveryResult {
     success: boolean
     content?: string
+    contents?: string[]
     error?: string
+    deliveredQuantity?: number
+    remainingQuantity?: number
+    reservedStockItemIds?: number[]
 }

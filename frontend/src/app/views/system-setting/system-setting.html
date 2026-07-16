@@ -9,23 +9,23 @@
                     <span class="label-text font-medium">主题模式</span>
                 </label>
                 <div class="flex gap-2 flex-wrap">
-                    <button class="btn btn-sm" [class.btn-primary]="currentTheme() === 'pink'"
-                        [class.btn-ghost]="currentTheme() !== 'pink'" (click)="setTheme('pink')">
+                    <button class="btn btn-sm" [class.btn-primary]="currentTheme === 'pink'"
+                        [class.btn-ghost]="currentTheme !== 'pink'" (click)="setTheme('pink')">
                         <lucide-icon [img]="icons.Heart" class="w-4 h-4"></lucide-icon>
                         少女粉
                     </button>
-                    <button class="btn btn-sm" [class.btn-primary]="currentTheme() === 'dark'"
-                        [class.btn-ghost]="currentTheme() !== 'dark'" (click)="setTheme('dark')">
+                    <button class="btn btn-sm" [class.btn-primary]="currentTheme === 'dark'"
+                        [class.btn-ghost]="currentTheme !== 'dark'" (click)="setTheme('dark')">
                         <lucide-icon [img]="icons.Moon" class="w-4 h-4"></lucide-icon>
                         深色粉
                     </button>
-                    <button class="btn btn-sm" [class.btn-primary]="currentTheme() === 'light'"
-                        [class.btn-ghost]="currentTheme() !== 'light'" (click)="setTheme('light')">
+                    <button class="btn btn-sm" [class.btn-primary]="currentTheme === 'light'"
+                        [class.btn-ghost]="currentTheme !== 'light'" (click)="setTheme('light')">
                         <lucide-icon [img]="icons.Sun" class="w-4 h-4"></lucide-icon>
                         浅色
                     </button>
-                    <button class="btn btn-sm" [class.btn-primary]="currentTheme() === 'system'"
-                        [class.btn-ghost]="currentTheme() !== 'system'" (click)="setTheme('system')">
+                    <button class="btn btn-sm" [class.btn-primary]="currentTheme === 'system'"
+                        [class.btn-ghost]="currentTheme !== 'system'" (click)="setTheme('system')">
                         <lucide-icon [img]="icons.Monitor" class="w-4 h-4"></lucide-icon>
                         跟随系统
                     </button>
@@ -75,8 +75,11 @@
                     <label class="label py-1">
                         <span class="label-text">模型</span>
                     </label>
-                    <input type="text" class="input input-bordered input-sm w-full" placeholder="gpt-3.5-turbo"
+                    <input type="text" class="input input-bordered input-sm w-full" [attr.placeholder]="recommendedStableModel"
                         [ngModel]="aiSettings().model" (ngModelChange)="updateAIField('model', $event)" />
+                    <label class="label py-1">
+                        <span class="label-text-alt text-base-content/60">默认推荐：{{ recommendedStableModel }}（当前上游更稳定，优先建议使用）</span>
+                    </label>
                 </div>
             </div>
 

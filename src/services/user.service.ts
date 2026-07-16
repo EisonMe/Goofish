@@ -77,7 +77,7 @@ export async function fetchUserHead(
             sessionOption: 'AutoLoginOnly'
         })
 
-        const res = await fetch(`${API_ENDPOINTS.USER_HEAD}?${params}`, {
+        const res = await fetch(`${API_ENDPOINTS.USER_HEAD}?${params}`, { signal: AbortSignal.timeout(30000),
             method: 'POST',
             headers: {
                 'accept': 'application/json',
@@ -156,7 +156,7 @@ export async function fetchLoginUserId(accountId: string): Promise<string | null
             api: 'mtop.taobao.idlemessage.pc.loginuser.get'
         })
 
-        const res = await fetch(`${API_ENDPOINTS.LOGIN_USER}?${params}`, {
+        const res = await fetch(`${API_ENDPOINTS.LOGIN_USER}?${params}`, { signal: AbortSignal.timeout(30000),
             method: 'POST',
             headers: {
                 'accept': 'application/json',
@@ -218,7 +218,7 @@ export async function fetchUserProfile(
             api: 'mtop.idle.web.user.page.nav'
         })
 
-        const res = await fetch(`${API_ENDPOINTS.USER_INFO}?${params}`, {
+        const res = await fetch(`${API_ENDPOINTS.USER_INFO}?${params}`, { signal: AbortSignal.timeout(30000),
             method: 'POST',
             headers: {
                 'accept': 'application/json',

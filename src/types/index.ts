@@ -25,5 +25,8 @@ export * from './order.types.js'
 // 自动发货类型
 export * from './autosell.types.js'
 
+// AI 追踪类型
+export * from './ai.types.js'
+
 // 发货流程类型
 export * from './workflow.types.js'
