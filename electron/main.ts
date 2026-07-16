@@ -58,9 +58,9 @@ function findAvailablePort(): Promise<number> {
     })
 }
 
-function prepareRuntime(appPath: string) {
+function prepareRuntime(resourcePath: string) {
     runtimeDir = path.join(app.getPath('userData'), 'runtime')
-    const sourcePublicDir = path.join(appPath, 'public')
+    const sourcePublicDir = path.join(resourcePath, 'public')
     const targetPublicDir = path.join(runtimeDir, 'public')
 
     if (!existsSync(sourcePublicDir)) {
@@ -261,7 +261,8 @@ async function initialize() {
     })
 
     const appPath = app.getAppPath()
-    prepareRuntime(appPath)
+    const resourcePath = app.isPackaged ? process.resourcesPath : appPath
+    prepareRuntime(resourcePath)
 
     const port = await findAvailablePort()
     process.env.HOST = '127.0.0.1'
