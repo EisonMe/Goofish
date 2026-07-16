@@ -111,7 +111,10 @@ async function fetchOrderDetailAsync(accountId: string, orderId: string) {
 }
 
 const entryPath = process.argv[1] ? pathToFileURL(path.resolve(process.argv[1])).href : ''
-const isDirectRun = entryPath === import.meta.url
+const pm2EntryPath = process.env.pm_exec_path
+    ? pathToFileURL(path.resolve(process.env.pm_exec_path)).href
+    : ''
+const isDirectRun = entryPath === import.meta.url || pm2EntryPath === import.meta.url
 
 if (isDirectRun) {
     const handleSignal = async (signal: string) => {
