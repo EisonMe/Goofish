@@ -1,4 +1,4 @@
-import { cpSync, existsSync, mkdirSync, rmSync } from 'node:fs'
+import { existsSync, mkdirSync } from 'node:fs'
 import { createServer } from 'node:net'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -61,17 +61,16 @@ function findAvailablePort(): Promise<number> {
 function prepareRuntime(resourcePath: string) {
     runtimeDir = path.join(app.getPath('userData'), 'runtime')
     const sourcePublicDir = path.join(resourcePath, 'public')
-    const targetPublicDir = path.join(runtimeDir, 'public')
 
     if (!existsSync(sourcePublicDir)) {
         throw new Error(`找不到前端资源目录: ${sourcePublicDir}`)
     }
 
     mkdirSync(runtimeDir, { recursive: true })
-    rmSync(targetPublicDir, { recursive: true, force: true })
-    cpSync(sourcePublicDir, targetPublicDir, { recursive: true })
     mkdirSync(path.join(runtimeDir, 'data'), { recursive: true })
     mkdirSync(path.join(runtimeDir, 'logs'), { recursive: true })
+
+    return sourcePublicDir
 }
 
 function isStartHidden() {
@@ -262,13 +261,14 @@ async function initialize() {
 
     const appPath = app.getAppPath()
     const resourcePath = app.isPackaged ? process.resourcesPath : appPath
-    prepareRuntime(resourcePath)
+    const staticDir = prepareRuntime(resourcePath)
 
     const port = await findAvailablePort()
     process.env.HOST = '127.0.0.1'
     process.env.PORT = String(port)
     process.env.NODE_ENV = 'production'
     process.env.GOOFISH_DESKTOP = '1'
+    process.env.GOOFISH_STATIC_DIR = staticDir
     process.chdir(runtimeDir)
 
     const backendEntry = path.join(appPath, 'dist', 'index.js')

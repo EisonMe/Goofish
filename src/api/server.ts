@@ -127,10 +127,10 @@ export function createApp() {
 }
 
 function setupStaticFiles(app: Hono) {
-    const staticDir = path.join(process.cwd(), SERVER_CONFIG.STATIC_DIR)
+    const staticDir = path.resolve(process.cwd(), SERVER_CONFIG.STATIC_DIR)
 
     if (fs.existsSync(staticDir)) {
-        app.use('/*', serveStatic({ root: `./${SERVER_CONFIG.STATIC_DIR}` }))
+        app.use('/*', serveStatic({ root: staticDir }))
 
         app.get('*', (c) => {
             const indexPath = path.join(staticDir, 'index.html')

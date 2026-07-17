@@ -79,7 +79,7 @@ export const ENV = {
 export const SERVER_CONFIG = {
     HOST: process.env.HOST || '0.0.0.0',
     PORT: Number(process.env.PORT || 3000),
-    STATIC_DIR: 'public'
+    STATIC_DIR: process.env.GOOFISH_STATIC_DIR || 'public'
 }
 
 // 数据库配置
